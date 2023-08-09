@@ -39,7 +39,7 @@ if ((CMAKE_SYSTEM_NAME MATCHES "FreeBSD") AND (CMAKE_SYSTEM_VERSION MATCHES "HBS
   set(PHP_EXECUTABLE "PHP_EXECUTABLE-NOTFOUND")
 endif()
 
-set(TD_API_JAVA_PACKAGE "com/thevisa/bot/telegram/walle/tdapi")
+set(TD_API_JAVA_PACKAGE "org/drinkless/tdlib")
 set(TD_API_JAVA_PATH ${CMAKE_CURRENT_SOURCE_DIR})
 set(TD_API_TLO_PATH ${CMAKE_CURRENT_SOURCE_DIR}/td/bin/td/generate/scheme/td_api.tlo)
 set(TD_API_TL_PATH ${CMAKE_CURRENT_SOURCE_DIR}/td/bin/td/generate/scheme/td_api.tl)
@@ -59,13 +59,13 @@ set(JAVA_SOURCE_PATH "${TD_API_JAVA_PATH}/${TD_API_JAVA_PACKAGE}")
 get_filename_component(JAVA_OUTPUT_DIRECTORY ${CMAKE_INSTALL_PREFIX}/bin REALPATH BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}")
 file(MAKE_DIRECTORY ${JAVA_OUTPUT_DIRECTORY})
 add_custom_target(build_java
-  COMMAND ${Java_JAVAC_EXECUTABLE} -encoding UTF-8 -d ${JAVA_OUTPUT_DIRECTORY} ${JAVA_SOURCE_PATH}/Example.java ${JAVA_SOURCE_PATH}/Client.java ${JAVA_SOURCE_PATH}/TdApi.java
+  COMMAND ${Java_JAVAC_EXECUTABLE} -encoding UTF-8 -d ${JAVA_OUTPUT_DIRECTORY} ${JAVA_SOURCE_PATH}/example/Example.java ${JAVA_SOURCE_PATH}/Client.java ${JAVA_SOURCE_PATH}/TdApi.java
   COMMENT "Building Java code"
   DEPENDS td_generate_java_api
 )
 
 add_custom_target(generate_javadoc
-  COMMAND ${Java_JAVADOC_EXECUTABLE} -encoding UTF-8 -charset UTF-8 -d ${JAVA_OUTPUT_DIRECTORY}/../docs com.thevisa.bot.telegram.walle.tdapi
+  COMMAND ${Java_JAVADOC_EXECUTABLE} -encoding UTF-8 -charset UTF-8 -d ${JAVA_OUTPUT_DIRECTORY}/../docs org.drinkless.tdlib
   WORKING_DIRECTORY ${TD_API_JAVA_PATH}
   COMMENT "Generating Javadoc documentation"
   DEPENDS td_generate_java_api

@@ -4,7 +4,7 @@
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
-package org.drinkless.tdlib;
+package com.thevisa.bot.telegram.walle.tdapi;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -135,7 +135,7 @@ public final class Client {
      * @param maxVerbosityLevel The maximum verbosity level of messages for which the callback will be called.
      * @param logMessageHandler Handler for messages that are added to the internal TDLib log. Pass null to remove the handler.
      */
-    public static void setLogMessageHandler(int maxVerbosityLevel, Client.LogMessageHandler logMessageHandler) {
+    public static void setLogMessageHandler(int maxVerbosityLevel, LogMessageHandler logMessageHandler) {
         nativeClientSetLogMessageHandler(maxVerbosityLevel, logMessageHandler);
     }
 

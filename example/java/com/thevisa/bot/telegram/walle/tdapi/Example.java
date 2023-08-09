@@ -4,10 +4,9 @@
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
-package org.drinkless.tdlib.example;
+package com.thevisa.bot.telegram.walle.tdapi;
 
-import org.drinkless.tdlib.Client;
-import org.drinkless.tdlib.TdApi;
+
 
 import java.io.BufferedReader;
 import java.io.IOError;
@@ -52,7 +51,7 @@ public final class Example {
     private static final ConcurrentMap<Long, TdApi.SupergroupFullInfo> supergroupsFullInfo = new ConcurrentHashMap<Long, TdApi.SupergroupFullInfo>();
 
     private static final String newLine = System.getProperty("line.separator");
-    private static final String commandsLine = "Enter command (gcs - GetChats, gc <chatId> - GetChat, me - GetMe, sm <chatId> <message> - SendMessage, lo - LogOut, q - Quit): ";
+    private static final String commandsLine = "Enter command (cm - Check Message, gcs - GetChats, gc <chatId> - GetChat, me - GetMe, sm <chatId> <message> - SendMessage, lo - LogOut, q - Quit): ";
     private static volatile String currentPrompt = null;
 
     private static void print(String str) {
@@ -237,6 +236,10 @@ public final class Example {
                     haveAuthorization = false;
                     client.send(new TdApi.Close(), defaultHandler);
                     break;
+                case "cm":
+                    TdApi.GetChat getChat = new TdApi.GetChat(getChatId("266389451"));
+                    client.send(getChat, new MessageHandler());
+                    break;
                 default:
                     System.err.println("Unsupported command: " + command);
             }
@@ -326,7 +329,10 @@ public final class Example {
             }
 
             while (haveAuthorization) {
-                getCommand();
+//                getCommand();
+                TdApi.GetChat getChat = new TdApi.GetChat(getChatId("-600473841"));
+                client.send(getChat, new MessageHandler());
+                Thread.sleep(2000);
             }
         }
         while (!canQuit) {
@@ -365,6 +371,25 @@ public final class Example {
         @Override
         public void onResult(TdApi.Object object) {
             print(object.toString());
+        }
+    }
+
+    private static class MessageHandler implements Client.ResultHandler {
+        @Override
+        public void onResult(TdApi.Object object) {
+            switch (object.getConstructor()) {
+                case TdApi.Chat.CONSTRUCTOR: {
+                    TdApi.Chat chat = (TdApi.Chat) object;
+                    TdApi.Message msg = chat.lastMessage;
+                    TdApi.MessageText content = (TdApi.MessageText) msg.content;
+                    String text = content.text.text;
+                    if (text.contains("visa")) {
+                        sendMessage(Long.parseLong("-933675606"), "Сообщение с ключевым словом обнаружено. Сообщение " + text);
+                    }
+                }
+                default:
+                    print("Not message object");
+            }
         }
     }
 
