@@ -6,18 +6,22 @@
 //
 #pragma once
 
+#include "td/telegram/ChannelId.h"
+#include "td/telegram/DialogBoostLinkInfo.h"
 #include "td/telegram/DialogDate.h"
 #include "td/telegram/DialogId.h"
 #include "td/telegram/files/FileId.h"
 #include "td/telegram/files/FileSourceId.h"
-#include "td/telegram/FullMessageId.h"
+#include "td/telegram/MediaArea.h"
 #include "td/telegram/MessageEntity.h"
-#include "td/telegram/MessageViewer.h"
+#include "td/telegram/MessageFullId.h"
+#include "td/telegram/ReactionType.h"
 #include "td/telegram/StoryDb.h"
 #include "td/telegram/StoryFullId.h"
 #include "td/telegram/StoryId.h"
 #include "td/telegram/StoryInteractionInfo.h"
 #include "td/telegram/StoryListId.h"
+#include "td/telegram/StoryStealthMode.h"
 #include "td/telegram/td_api.h"
 #include "td/telegram/telegram_api.h"
 #include "td/telegram/UserId.h"
@@ -32,6 +36,7 @@
 #include "td/utils/FlatHashMap.h"
 #include "td/utils/FlatHashSet.h"
 #include "td/utils/Promise.h"
+#include "td/utils/Slice.h"
 #include "td/utils/Status.h"
 #include "td/utils/WaitFreeHashMap.h"
 #include "td/utils/WaitFreeHashSet.h"
@@ -60,11 +65,14 @@ class StoryManager final : public Actor {
     bool is_for_close_friends_ = false;
     bool is_for_contacts_ = false;
     bool is_for_selected_contacts_ = false;
+    bool is_outgoing_ = false;
     bool noforwards_ = false;
     mutable bool is_update_sent_ = false;  // whether the story is known to the app
     StoryInteractionInfo interaction_info_;
+    ReactionType chosen_reaction_type_;
     UserPrivacySettingRules privacy_rules_;
     unique_ptr<StoryContent> content_;
+    vector<MediaArea> areas_;
     FormattedText caption_;
     int64 global_id_ = 0;
 
@@ -90,7 +98,9 @@ class StoryManager final : public Actor {
 
   struct BeingEditedStory {
     unique_ptr<StoryContent> content_;
+    vector<MediaArea> areas_;
     FormattedText caption_;
+    bool edit_media_areas_ = false;
     bool edit_caption_ = false;
     vector<Promise<Unit>> promises_;
     int64 log_event_id_ = 0;
@@ -150,16 +160,12 @@ class StoryManager final : public Actor {
     void parse(ParserT &parser);
   };
 
-  struct CachedStoryViewers {
-    int32 total_count_ = -1;
-    MessageViewers viewers_;
-  };
-
   struct StoryList {
     int32 server_total_count_ = -1;
     int32 sent_total_count_ = -1;
     string state_;
 
+    bool is_reloaded_server_total_count_ = false;
     bool server_has_more_ = true;
     bool database_has_more_ = false;
 
@@ -195,22 +201,35 @@ class StoryManager final : public Actor {
   void get_story(DialogId owner_dialog_id, StoryId story_id, bool only_local,
                  Promise<td_api::object_ptr<td_api::story>> &&promise);
 
-  void send_story(td_api::object_ptr<td_api::InputStoryContent> &&input_story_content,
+  void get_dialogs_to_send_stories(Promise<td_api::object_ptr<td_api::chats>> &&promise);
+
+  void reload_dialogs_to_send_stories(Promise<td_api::object_ptr<td_api::chats>> &&promise);
+
+  void on_get_dialogs_to_send_stories(vector<tl_object_ptr<telegram_api::Chat>> &&chats);
+
+  void update_dialogs_to_send_stories(ChannelId channel_id, bool can_send_stories);
+
+  void can_send_story(DialogId dialog_id, Promise<td_api::object_ptr<td_api::CanSendStoryResult>> &&promise);
+
+  void send_story(DialogId dialog_id, td_api::object_ptr<td_api::InputStoryContent> &&input_story_content,
+                  td_api::object_ptr<td_api::inputStoryAreas> &&input_areas,
                   td_api::object_ptr<td_api::formattedText> &&input_caption,
                   td_api::object_ptr<td_api::StoryPrivacySettings> &&settings, int32 active_period, bool is_pinned,
                   bool protect_content, Promise<td_api::object_ptr<td_api::story>> &&promise);
 
   void on_send_story_file_parts_missing(unique_ptr<PendingStory> &&pending_story, vector<int> &&bad_parts);
 
-  void edit_story(StoryId story_id, td_api::object_ptr<td_api::InputStoryContent> &&input_story_content,
+  void edit_story(DialogId owner_dialog_id, StoryId story_id,
+                  td_api::object_ptr<td_api::InputStoryContent> &&input_story_content,
+                  td_api::object_ptr<td_api::inputStoryAreas> &&input_areas,
                   td_api::object_ptr<td_api::formattedText> &&input_caption, Promise<Unit> &&promise);
 
-  void set_story_privacy_settings(StoryId story_id, td_api::object_ptr<td_api::StoryPrivacySettings> &&settings,
-                                  Promise<Unit> &&promise);
+  void set_story_privacy_settings(DialogId owner_dialog_id, StoryId story_id,
+                                  td_api::object_ptr<td_api::StoryPrivacySettings> &&settings, Promise<Unit> &&promise);
 
-  void toggle_story_is_pinned(StoryId story_id, bool is_pinned, Promise<Unit> &&promise);
+  void toggle_story_is_pinned(DialogId owner_dialog_id, StoryId story_id, bool is_pinned, Promise<Unit> &&promise);
 
-  void delete_story(StoryId story_id, Promise<Unit> &&promise);
+  void delete_story(DialogId owner_dialog_id, StoryId story_id, Promise<Unit> &&promise);
 
   void load_active_stories(StoryListId story_list_id, Promise<Unit> &&promise);
 
@@ -223,10 +242,13 @@ class StoryManager final : public Actor {
   void get_dialog_pinned_stories(DialogId owner_dialog_id, StoryId from_story_id, int32 limit,
                                  Promise<td_api::object_ptr<td_api::stories>> &&promise);
 
-  void get_story_archive(StoryId from_story_id, int32 limit, Promise<td_api::object_ptr<td_api::stories>> &&promise);
+  void get_story_archive(DialogId owner_dialog_id, StoryId from_story_id, int32 limit,
+                         Promise<td_api::object_ptr<td_api::stories>> &&promise);
 
   void get_dialog_expiring_stories(DialogId owner_dialog_id,
                                    Promise<td_api::object_ptr<td_api::chatActiveStories>> &&promise);
+
+  void reload_dialog_expiring_stories(DialogId dialog_id);
 
   void open_story(DialogId owner_dialog_id, StoryId story_id, Promise<Unit> &&promise);
 
@@ -236,10 +258,36 @@ class StoryManager final : public Actor {
 
   void on_story_replied(StoryFullId story_full_id, UserId replier_user_id);
 
-  void get_story_viewers(StoryId story_id, const td_api::messageViewer *offset, int32 limit,
-                         Promise<td_api::object_ptr<td_api::messageViewers>> &&promise);
+  void set_story_reaction(StoryFullId story_full_id, ReactionType reaction_type, bool add_to_recent,
+                          Promise<Unit> &&promise);
+
+  void get_story_viewers(StoryId story_id, const string &query, bool only_contacts, bool prefer_with_reaction,
+                         const string &offset, int32 limit,
+                         Promise<td_api::object_ptr<td_api::storyViewers>> &&promise);
 
   void report_story(StoryFullId story_full_id, ReportReason &&reason, Promise<Unit> &&promise);
+
+  void activate_stealth_mode(Promise<Unit> &&promise);
+
+  void get_dialog_boost_status(DialogId dialog_id, Promise<td_api::object_ptr<td_api::chatBoostStatus>> &&promise);
+
+  void can_boost_dialog(DialogId dialog_id, Promise<td_api::object_ptr<td_api::CanBoostChatResult>> &&promise);
+
+  td_api::object_ptr<td_api::CanBoostChatResult> get_can_boost_chat_result_object(
+      telegram_api::object_ptr<telegram_api::stories_CanApplyBoostResult> &&result) const;
+
+  td_api::object_ptr<td_api::CanBoostChatResult> get_can_boost_chat_result_object(const Status &error) const;
+
+  void boost_dialog(DialogId dialog_id, Promise<Unit> &&promise);
+
+  Result<std::pair<string, bool>> get_dialog_boost_link(DialogId dialog_id);
+
+  void get_dialog_boost_link_info(Slice url, Promise<DialogBoostLinkInfo> &&promise);
+
+  td_api::object_ptr<td_api::chatBoostLinkInfo> get_chat_boost_link_info_object(const DialogBoostLinkInfo &info) const;
+
+  void get_dialog_boosts(DialogId dialog_id, const string &offset, int32 limit,
+                         Promise<td_api::object_ptr<td_api::foundChatBoosts>> &&promise);
 
   void remove_story_notifications_by_story_ids(DialogId dialog_id, const vector<StoryId> &story_ids);
 
@@ -248,17 +296,28 @@ class StoryManager final : public Actor {
   std::pair<int32, vector<StoryId>> on_get_stories(DialogId owner_dialog_id, vector<StoryId> &&expected_story_ids,
                                                    telegram_api::object_ptr<telegram_api::stories_stories> &&stories);
 
-  DialogId on_get_user_stories(DialogId owner_dialog_id,
-                               telegram_api::object_ptr<telegram_api::userStories> &&user_stories,
-                               Promise<Unit> &&promise);
+  DialogId on_get_dialog_stories(DialogId owner_dialog_id,
+                                 telegram_api::object_ptr<telegram_api::peerStories> &&peer_stories,
+                                 Promise<Unit> &&promise);
+
+  void on_update_story_id(int64 random_id, StoryId new_story_id, const char *source);
 
   bool on_update_read_stories(DialogId owner_dialog_id, StoryId max_read_story_id);
 
+  void on_update_story_stealth_mode(telegram_api::object_ptr<telegram_api::storiesStealthMode> &&stealth_mode);
+
+  void on_update_story_chosen_reaction_type(DialogId owner_dialog_id, StoryId story_id,
+                                            ReactionType chosen_reaction_type);
+
+  void on_update_dialog_stories_hidden(DialogId owner_dialog_id, bool stories_hidden);
+
   void on_dialog_active_stories_order_updated(DialogId owner_dialog_id, const char *source);
 
-  Status can_get_story_viewers(StoryFullId story_full_id, const Story *story) const;
+  Status can_get_story_viewers(StoryFullId story_full_id, const Story *story, int32 unix_time) const;
 
-  void on_get_story_views(const vector<StoryId> &story_ids,
+  bool has_unexpired_viewers(StoryFullId story_full_id, const Story *story) const;
+
+  void on_get_story_views(DialogId owner_dialog_id, const vector<StoryId> &story_ids,
                           telegram_api::object_ptr<telegram_api::stories_storyViews> &&story_views);
 
   bool have_story(StoryFullId story_full_id) const;
@@ -269,9 +328,9 @@ class StoryManager final : public Actor {
 
   int32 get_story_duration(StoryFullId story_full_id) const;
 
-  void register_story(StoryFullId story_full_id, FullMessageId full_message_id, const char *source);
+  void register_story(StoryFullId story_full_id, MessageFullId message_full_id, const char *source);
 
-  void unregister_story(StoryFullId story_full_id, FullMessageId full_message_id, const char *source);
+  void unregister_story(StoryFullId story_full_id, MessageFullId message_full_id, const char *source);
 
   td_api::object_ptr<td_api::story> get_story_object(StoryFullId story_full_id) const;
 
@@ -327,7 +386,23 @@ class StoryManager final : public Actor {
 
   void on_story_can_get_viewers_timeout(int64 story_global_id);
 
-  bool is_story_owned(DialogId owner_dialog_id) const;
+  bool is_my_story(DialogId owner_dialog_id) const;
+
+  bool can_access_expired_story(DialogId owner_dialog_id, const Story *story) const;
+
+  bool can_get_story_view_count(DialogId owner_dialog_id);
+
+  bool can_post_stories(DialogId owner_dialog_id) const;
+
+  bool can_edit_stories(DialogId owner_dialog_id) const;
+
+  bool can_delete_stories(DialogId owner_dialog_id) const;
+
+  bool can_edit_story(StoryFullId story_full_id, const Story *story) const;
+
+  bool can_toggle_story_is_pinned(StoryFullId story_full_id, const Story *story) const;
+
+  bool can_delete_story(StoryFullId story_full_id, const Story *story) const;
 
   int32 get_story_viewers_expire_date(const Story *story) const;
 
@@ -359,8 +434,12 @@ class StoryManager final : public Actor {
 
   ActiveStories *get_active_stories_force(DialogId owner_dialog_id, const char *source);
 
-  ActiveStories *on_get_active_stories_from_database(DialogId owner_dialog_id, const BufferSlice &value,
-                                                     const char *source);
+  ActiveStories *on_get_active_stories_from_database(StoryListId story_list_id, DialogId owner_dialog_id,
+                                                     const BufferSlice &value, const char *source);
+
+  void set_story_expire_timeout(const Story *story);
+
+  void set_story_can_get_viewers_timeout(const Story *story);
 
   void on_story_changed(StoryFullId story_full_id, const Story *story, bool is_changed, bool need_save_to_database,
                         bool from_database = false);
@@ -377,8 +456,6 @@ class StoryManager final : public Actor {
 
   td_api::object_ptr<td_api::story> get_story_object(StoryFullId story_full_id, const Story *story) const;
 
-  td_api::object_ptr<td_api::chatActiveStories> get_chat_active_stories_object(DialogId owner_dialog_id) const;
-
   td_api::object_ptr<td_api::chatActiveStories> get_chat_active_stories_object(
       DialogId owner_dialog_id, const ActiveStories *active_stories) const;
 
@@ -392,15 +469,22 @@ class StoryManager final : public Actor {
 
   void on_delete_story(StoryFullId story_full_id);
 
+  void return_dialogs_to_send_stories(Promise<td_api::object_ptr<td_api::chats>> &&promise,
+                                      const vector<ChannelId> &channel_ids);
+
+  void finish_get_dialogs_to_send_stories(Result<Unit> &&result);
+
+  void save_channels_to_send_stories();
+
   void on_get_dialog_pinned_stories(DialogId owner_dialog_id,
                                     telegram_api::object_ptr<telegram_api::stories_stories> &&stories,
                                     Promise<td_api::object_ptr<td_api::stories>> &&promise);
 
-  void on_get_story_archive(telegram_api::object_ptr<telegram_api::stories_stories> &&stories,
+  void on_get_story_archive(DialogId owner_dialog_id, telegram_api::object_ptr<telegram_api::stories_stories> &&stories,
                             Promise<td_api::object_ptr<td_api::stories>> &&promise);
 
   void on_get_dialog_expiring_stories(DialogId owner_dialog_id,
-                                      telegram_api::object_ptr<telegram_api::stories_userStories> &&stories,
+                                      telegram_api::object_ptr<telegram_api::stories_peerStories> &&stories,
                                       Promise<td_api::object_ptr<td_api::chatActiveStories>> &&promise);
 
   static uint64 save_load_dialog_expiring_stories_log_event(DialogId owner_dialog_id);
@@ -427,9 +511,9 @@ class StoryManager final : public Actor {
   td_api::object_ptr<td_api::updateStoryListChatCount> get_update_story_list_chat_count_object(
       StoryListId story_list_id, const StoryList &story_list) const;
 
-  void update_story_list_sent_total_count(StoryListId story_list_id);
+  void update_story_list_sent_total_count(StoryListId story_list_id, const char *source);
 
-  void update_story_list_sent_total_count(StoryListId story_list_id, StoryList &story_list);
+  void update_story_list_sent_total_count(StoryListId story_list_id, StoryList &story_list, const char *source);
 
   vector<FileId> get_story_file_ids(const Story *story) const;
 
@@ -452,18 +536,28 @@ class StoryManager final : public Actor {
 
   void delete_pending_story(FileId file_id, unique_ptr<PendingStory> &&pending_story, Status status);
 
+  Result<StoryId> get_next_yet_unsent_story_id(DialogId dialog_id);
+
   void do_send_story(unique_ptr<PendingStory> &&pending_story, vector<int> bad_parts);
 
   void on_upload_story(FileId file_id, telegram_api::object_ptr<telegram_api::InputFile> input_file);
 
   void on_upload_story_error(FileId file_id, Status status);
 
-  void try_send_story();
+  void try_send_story(DialogId dialog_id);
 
   void do_edit_story(FileId file_id, unique_ptr<PendingStory> &&pending_story,
                      telegram_api::object_ptr<telegram_api::InputFile> input_file);
 
-  void on_toggle_story_is_pinned(StoryId story_id, bool is_pinned, Promise<Unit> &&promise);
+  void on_toggle_story_is_pinned(StoryFullId story_full_id, bool is_pinned, Promise<Unit> &&promise);
+
+  void on_update_dialog_max_story_ids(DialogId owner_dialog_id, StoryId max_story_id, StoryId max_read_story_id);
+
+  void on_update_dialog_max_read_story_id(DialogId owner_dialog_id, StoryId max_read_story_id);
+
+  void on_update_dialog_has_pinned_stories(DialogId owner_dialog_id, bool has_pinned_stories);
+
+  void update_active_stories(DialogId owner_dialog_id);
 
   void on_update_active_stories(DialogId owner_dialog_id, StoryId max_read_story_id, vector<StoryId> &&story_ids,
                                 Promise<Unit> &&promise, const char *source, bool from_database = false);
@@ -475,10 +569,11 @@ class StoryManager final : public Actor {
 
   void send_update_story(StoryFullId story_full_id, const Story *story);
 
-  td_api::object_ptr<td_api::updateChatActiveStories> get_update_chat_active_stories(
+  td_api::object_ptr<td_api::updateChatActiveStories> get_update_chat_active_stories_object(
       DialogId owner_dialog_id, const ActiveStories *active_stories) const;
 
-  void send_update_chat_active_stories(DialogId owner_dialog_id, const ActiveStories *active_stories) const;
+  void send_update_chat_active_stories(DialogId owner_dialog_id, const ActiveStories *active_stories,
+                                       const char *source);
 
   void save_active_stories(DialogId owner_dialog_id, const ActiveStories *active_stories, Promise<Unit> &&promise,
                            const char *source) const;
@@ -491,6 +586,12 @@ class StoryManager final : public Actor {
 
   void read_stories_on_server(DialogId owner_dialog_id, StoryId story_id, uint64 log_event_id);
 
+  static bool has_suggested_reaction(const Story *story, const ReactionType &reaction_type);
+
+  bool can_use_story_reaction(const Story *story, const ReactionType &reaction_type) const;
+
+  void on_story_chosen_reaction_changed(StoryFullId story_full_id, Story *story, const ReactionType &reaction_type);
+
   void schedule_interaction_info_update();
 
   static void update_interaction_info_static(void *story_manager);
@@ -499,9 +600,25 @@ class StoryManager final : public Actor {
 
   void on_synchronized_archive_all_stories(bool set_archive_all_stories, Result<Unit> result);
 
-  void on_get_story_viewers(StoryId story_id, MessageViewer offset,
+  td_api::object_ptr<td_api::updateStoryStealthMode> get_update_story_stealth_mode() const;
+
+  void send_update_story_stealth_mode() const;
+
+  void schedule_stealth_mode_update();
+
+  static void update_stealth_mode_static(void *story_manager);
+
+  void update_stealth_mode();
+
+  static string get_story_stealth_mode_key();
+
+  void set_story_stealth_mode(StoryStealthMode stealth_mode);
+
+  void on_get_story_viewers(StoryId story_id, bool is_full, bool is_first,
                             Result<telegram_api::object_ptr<telegram_api::stories_storyViewsList>> r_view_list,
-                            Promise<td_api::object_ptr<td_api::messageViewers>> &&promise);
+                            Promise<td_api::object_ptr<td_api::storyViewers>> &&promise);
+
+  void on_set_story_reaction(StoryFullId story_full_id, Result<Unit> &&result, Promise<Unit> &&promise);
 
   void load_expired_database_stories();
 
@@ -521,9 +638,11 @@ class StoryManager final : public Actor {
 
   WaitFreeHashSet<StoryFullId, StoryFullIdHash> failed_to_load_story_full_ids_;
 
-  WaitFreeHashMap<StoryFullId, WaitFreeHashSet<FullMessageId, FullMessageIdHash>, StoryFullIdHash> story_messages_;
+  WaitFreeHashMap<StoryFullId, WaitFreeHashSet<MessageFullId, MessageFullIdHash>, StoryFullIdHash> story_messages_;
 
   WaitFreeHashMap<DialogId, unique_ptr<ActiveStories>, DialogIdHash> active_stories_;
+
+  WaitFreeHashSet<DialogId, DialogIdHash> updated_active_stories_;
 
   WaitFreeHashMap<DialogId, StoryId, DialogIdHash> max_read_story_ids_;
 
@@ -537,27 +656,50 @@ class StoryManager final : public Actor {
 
   FlatHashMap<DialogId, PendingStoryViews, DialogIdHash> pending_story_views_;
 
-  FlatHashMap<StoryFullId, uint32, StoryFullIdHash> opened_owned_stories_;
+  FlatHashMap<StoryFullId, uint32, StoryFullIdHash> opened_stories_with_view_count_;
 
   FlatHashMap<StoryFullId, uint32, StoryFullIdHash> opened_stories_;
-
-  FlatHashMap<StoryFullId, unique_ptr<CachedStoryViewers>, StoryFullIdHash> cached_story_viewers_;
 
   FlatHashMap<StoryFullId, vector<Promise<Unit>>, StoryFullIdHash> reload_story_queries_;
 
   FlatHashMap<FileId, unique_ptr<PendingStory>, FileIdHash> being_uploaded_files_;
 
-  std::set<uint32> yet_unsent_stories_;
+  FlatHashMap<DialogId, std::set<uint32>, DialogIdHash> yet_unsent_stories_;
+
+  FlatHashMap<DialogId, vector<StoryId>, DialogIdHash> yet_unsent_story_ids_;
+
+  FlatHashMap<int64, StoryFullId> being_sent_stories_;
+
+  FlatHashMap<StoryFullId, int64, StoryFullIdHash> being_sent_story_random_ids_;
+
+  FlatHashMap<StoryFullId, FileId, StoryFullIdHash> being_uploaded_file_ids_;
+
+  FlatHashMap<StoryFullId, StoryId, StoryFullIdHash> update_story_ids_;
+
+  FlatHashMap<int64, vector<Promise<Unit>>> delete_yet_unsent_story_queries_;
 
   FlatHashMap<uint32, unique_ptr<ReadyToSendStory>> ready_to_send_stories_;
 
+  bool channels_to_send_stories_inited_ = false;
+  vector<ChannelId> channels_to_send_stories_;
+  vector<Promise<td_api::object_ptr<td_api::chats>>> get_dialogs_to_send_stories_queries_;
+  double next_reload_channels_to_send_stories_time_ = 0.0;
+
+  FlatHashMap<StoryFullId, int32, StoryFullIdHash> being_set_story_reactions_;
+
   StoryList story_lists_[2];
+
+  StoryStealthMode stealth_mode_;
 
   uint32 send_story_count_ = 0;
 
   int64 max_story_global_id_ = 0;
 
+  FlatHashMap<DialogId, int32, DialogIdHash> current_yet_unsent_story_ids_;
+
   bool has_active_synchronize_archive_all_stories_query_ = false;
+
+  Timeout stealth_mode_update_timeout_;
 
   Timeout interaction_info_update_timeout_;
 

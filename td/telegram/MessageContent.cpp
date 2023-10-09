@@ -6,6 +6,7 @@
 //
 #include "td/telegram/MessageContent.h"
 
+#include "td/telegram/AccessRights.h"
 #include "td/telegram/AnimationsManager.h"
 #include "td/telegram/AnimationsManager.hpp"
 #include "td/telegram/AudiosManager.h"
@@ -475,7 +476,7 @@ class MessageChatSetTtl final : public MessageContent {
 
 class MessageUnsupported final : public MessageContent {
  public:
-  static constexpr int32 CURRENT_VERSION = 19;
+  static constexpr int32 CURRENT_VERSION = 20;
   int32 version = CURRENT_VERSION;
 
   MessageUnsupported() = default;
@@ -929,6 +930,13 @@ class MessageStory final : public MessageContent {
   }
 };
 
+class MessageWriteAccessAllowedByRequest final : public MessageContent {
+ public:
+  MessageContentType get_type() const final {
+    return MessageContentType::WriteAccessAllowedByRequest;
+  }
+};
+
 template <class StorerT>
 static void store(const MessageContent *content, StorerT &storer) {
   CHECK(content != nullptr);
@@ -1329,6 +1337,8 @@ static void store(const MessageContent *content, StorerT &storer) {
       store(m->story_full_id, storer);
       break;
     }
+    case MessageContentType::WriteAccessAllowedByRequest:
+      break;
     default:
       UNREACHABLE();
   }
@@ -1866,12 +1876,15 @@ static void parse(unique_ptr<MessageContent> &content, ParserT &parser) {
       PARSE_FLAG(m->via_mention);
       END_PARSE_FLAGS();
       parse(m->story_full_id, parser);
-      if (!m->story_full_id.is_valid()) {
+      if (!m->story_full_id.is_server()) {
         is_bad = true;
       }
       content = std::move(m);
       break;
     }
+    case MessageContentType::WriteAccessAllowedByRequest:
+      content = make_unique<MessageWriteAccessAllowedByRequest>();
+      break;
     default:
       is_bad = true;
   }
@@ -2037,7 +2050,7 @@ static Result<InputMessageContent> create_input_message_content(
   bool clear_draft = false;
   unique_ptr<MessageContent> content;
   UserId via_bot_user_id;
-  int32 ttl = 0;
+  td_api::object_ptr<td_api::MessageSelfDestructType> self_destruct_type;
   string emoji;
   bool is_bot = td->auth_manager_->is_bot();
   bool is_secret = dialog_id.get_type() == DialogType::SecretChat;
@@ -2110,7 +2123,7 @@ static Result<InputMessageContent> create_input_message_content(
     case td_api::inputMessagePhoto::ID: {
       auto input_photo = static_cast<td_api::inputMessagePhoto *>(input_message_content.get());
 
-      ttl = input_photo->self_destruct_time_;
+      self_destruct_type = std::move(input_photo->self_destruct_type_);
 
       TRY_RESULT(photo, create_photo(td->file_manager_.get(), file_id, std::move(thumbnail), input_photo->width_,
                                      input_photo->height_, std::move(sticker_file_ids)));
@@ -2134,7 +2147,7 @@ static Result<InputMessageContent> create_input_message_content(
     case td_api::inputMessageVideo::ID: {
       auto input_video = static_cast<td_api::inputMessageVideo *>(input_message_content.get());
 
-      ttl = input_video->self_destruct_time_;
+      self_destruct_type = std::move(input_video->self_destruct_type_);
 
       bool has_stickers = !sticker_file_ids.empty();
       td->videos_manager_->create_video(file_id, string(), thumbnail, AnimationSize(), has_stickers,
@@ -2290,12 +2303,14 @@ static Result<InputMessageContent> create_input_message_content(
       DialogId story_sender_dialog_id(input_story->story_sender_chat_id_);
       StoryId story_id(input_story->story_id_);
       StoryFullId story_full_id(story_sender_dialog_id, story_id);
-      if (!td->story_manager_->have_story_force(story_full_id) ||
-          story_sender_dialog_id.get_type() != DialogType::User) {
+      if (!td->story_manager_->have_story_force(story_full_id)) {
         return Status::Error(400, "Story not found");
       }
-      if (td->contacts_manager_->get_input_user(story_sender_dialog_id.get_user_id()).is_error()) {
-        return Status::Error(400, "Can't access the user");
+      if (!story_id.is_server()) {
+        return Status::Error(400, "Story can't be forwarded");
+      }
+      if (td->messages_manager_->get_input_peer(dialog_id, AccessRights::Read) == nullptr) {
+        return Status::Error(400, "Can't access the story");
       }
       content = make_unique<MessageStory>(story_full_id, false);
       break;
@@ -2303,6 +2318,30 @@ static Result<InputMessageContent> create_input_message_content(
     default:
       UNREACHABLE();
   }
+
+  if (self_destruct_type != nullptr && dialog_id.get_type() != DialogType::User) {
+    return Status::Error(400, "Messages can self-destruct only in  can be specified only in private chats");
+  }
+  int32 ttl = 0;
+  if (self_destruct_type != nullptr) {
+    switch (self_destruct_type->get_id()) {
+      case td_api::messageSelfDestructTypeTimer::ID: {
+        ttl = static_cast<const td_api::messageSelfDestructTypeTimer *>(self_destruct_type.get())->self_destruct_time_;
+
+        static constexpr int32 MAX_PRIVATE_MESSAGE_TTL = 60;  // server side limit
+        if (ttl <= 0 || ttl > MAX_PRIVATE_MESSAGE_TTL) {
+          return Status::Error(400, "Invalid message content self-destruct time specified");
+        }
+        break;
+      }
+      case td_api::messageSelfDestructTypeImmediately::ID:
+        ttl = 0x7FFFFFFF;
+        break;
+      default:
+        UNREACHABLE();
+    }
+  }
+
   return InputMessageContent{std::move(content), disable_web_page_preview, clear_draft, ttl,
                              via_bot_user_id,    std::move(emoji)};
 }
@@ -2421,8 +2460,7 @@ bool can_have_input_media(const Td *td, const MessageContent *content, bool is_s
     case MessageContentType::Story: {
       auto story_full_id = static_cast<const MessageStory *>(content)->story_full_id;
       auto dialog_id = story_full_id.get_dialog_id();
-      CHECK(dialog_id.get_type() == DialogType::User);
-      return td->contacts_manager_->get_input_user(dialog_id.get_user_id()).is_ok();
+      return td->messages_manager_->get_input_peer(dialog_id, AccessRights::Read) != nullptr;
     }
     case MessageContentType::Unsupported:
     case MessageContentType::ChatCreate:
@@ -2463,6 +2501,7 @@ bool can_have_input_media(const Td *td, const MessageContent *content, bool is_s
     case MessageContentType::RequestedDialog:
     case MessageContentType::WebViewWriteAccessAllowed:
     case MessageContentType::SetBackground:
+    case MessageContentType::WriteAccessAllowedByRequest:
       return false;
     case MessageContentType::Animation:
     case MessageContentType::Audio:
@@ -2592,6 +2631,7 @@ SecretInputMedia get_secret_input_media(const MessageContent *content, Td *td,
     case MessageContentType::RequestedDialog:
     case MessageContentType::WebViewWriteAccessAllowed:
     case MessageContentType::SetBackground:
+    case MessageContentType::WriteAccessAllowedByRequest:
       break;
     default:
       UNREACHABLE();
@@ -2724,6 +2764,7 @@ static tl_object_ptr<telegram_api::InputMedia> get_input_media_impl(
     case MessageContentType::RequestedDialog:
     case MessageContentType::WebViewWriteAccessAllowed:
     case MessageContentType::SetBackground:
+    case MessageContentType::WriteAccessAllowedByRequest:
       break;
     default:
       UNREACHABLE();
@@ -2896,6 +2937,7 @@ void delete_message_content_thumbnail(MessageContent *content, Td *td) {
     case MessageContentType::RequestedDialog:
     case MessageContentType::WebViewWriteAccessAllowed:
     case MessageContentType::SetBackground:
+    case MessageContentType::WriteAccessAllowedByRequest:
       break;
     default:
       UNREACHABLE();
@@ -3090,6 +3132,7 @@ Status can_send_message_content(DialogId dialog_id, const MessageContent *conten
     case MessageContentType::RequestedDialog:
     case MessageContentType::WebViewWriteAccessAllowed:
     case MessageContentType::SetBackground:
+    case MessageContentType::WriteAccessAllowedByRequest:
       UNREACHABLE();
   }
   return Status::OK();
@@ -3227,6 +3270,7 @@ static int32 get_message_content_media_index_mask(const MessageContent *content,
     case MessageContentType::RequestedDialog:
     case MessageContentType::WebViewWriteAccessAllowed:
     case MessageContentType::SetBackground:
+    case MessageContentType::WriteAccessAllowedByRequest:
       return 0;
     default:
       UNREACHABLE();
@@ -3271,7 +3315,7 @@ string get_message_content_theme_name(const MessageContent *content) {
   }
 }
 
-FullMessageId get_message_content_replied_message_id(DialogId dialog_id, const MessageContent *content) {
+MessageFullId get_message_content_replied_message_id(DialogId dialog_id, const MessageContent *content) {
   switch (content->get_type()) {
     case MessageContentType::PinMessage:
       return {dialog_id, static_cast<const MessagePinMessage *>(content)->message_id};
@@ -3280,7 +3324,7 @@ FullMessageId get_message_content_replied_message_id(DialogId dialog_id, const M
     case MessageContentType::PaymentSuccessful: {
       auto *m = static_cast<const MessagePaymentSuccessful *>(content);
       if (!m->invoice_message_id.is_valid()) {
-        return FullMessageId();
+        return MessageFullId();
       }
 
       auto reply_in_dialog_id = m->invoice_dialog_id.is_valid() ? m->invoice_dialog_id : dialog_id;
@@ -3289,13 +3333,13 @@ FullMessageId get_message_content_replied_message_id(DialogId dialog_id, const M
     case MessageContentType::SetBackground: {
       auto *m = static_cast<const MessageSetBackground *>(content);
       if (!m->old_message_id.is_valid()) {
-        return FullMessageId();
+        return MessageFullId();
       }
 
       return {dialog_id, m->old_message_id};
     }
     default:
-      return FullMessageId();
+      return MessageFullId();
   }
 }
 
@@ -3451,6 +3495,8 @@ vector<UserId> get_message_content_min_user_ids(const Td *td, const MessageConte
       }
       break;
     }
+    case MessageContentType::WriteAccessAllowedByRequest:
+      break;
     default:
       UNREACHABLE();
       break;
@@ -3499,6 +3545,15 @@ bool get_message_content_poll_is_closed(const Td *td, const MessageContent *cont
   }
 }
 
+const Venue *get_message_content_venue(const MessageContent *content) {
+  switch (content->get_type()) {
+    case MessageContentType::Venue:
+      return &static_cast<const MessageVenue *>(content)->venue;
+    default:
+      return nullptr;
+  }
+}
+
 bool has_message_content_web_page(const MessageContent *content) {
   if (content->get_type() == MessageContentType::Text) {
     return static_cast<const MessageText *>(content)->web_page_id.is_valid();
@@ -3529,25 +3584,25 @@ bool can_message_content_have_media_timestamp(const MessageContent *content) {
   }
 }
 
-void set_message_content_poll_answer(Td *td, const MessageContent *content, FullMessageId full_message_id,
+void set_message_content_poll_answer(Td *td, const MessageContent *content, MessageFullId message_full_id,
                                      vector<int32> &&option_ids, Promise<Unit> &&promise) {
   CHECK(content->get_type() == MessageContentType::Poll);
-  td->poll_manager_->set_poll_answer(static_cast<const MessagePoll *>(content)->poll_id, full_message_id,
+  td->poll_manager_->set_poll_answer(static_cast<const MessagePoll *>(content)->poll_id, message_full_id,
                                      std::move(option_ids), std::move(promise));
 }
 
-void get_message_content_poll_voters(Td *td, const MessageContent *content, FullMessageId full_message_id,
+void get_message_content_poll_voters(Td *td, const MessageContent *content, MessageFullId message_full_id,
                                      int32 option_id, int32 offset, int32 limit,
                                      Promise<td_api::object_ptr<td_api::messageSenders>> &&promise) {
   CHECK(content->get_type() == MessageContentType::Poll);
-  td->poll_manager_->get_poll_voters(static_cast<const MessagePoll *>(content)->poll_id, full_message_id, option_id,
+  td->poll_manager_->get_poll_voters(static_cast<const MessagePoll *>(content)->poll_id, message_full_id, option_id,
                                      offset, limit, std::move(promise));
 }
 
-void stop_message_content_poll(Td *td, const MessageContent *content, FullMessageId full_message_id,
+void stop_message_content_poll(Td *td, const MessageContent *content, MessageFullId message_full_id,
                                unique_ptr<ReplyMarkup> &&reply_markup, Promise<Unit> &&promise) {
   CHECK(content->get_type() == MessageContentType::Poll);
-  td->poll_manager_->stop_poll(static_cast<const MessagePoll *>(content)->poll_id, full_message_id,
+  td->poll_manager_->stop_poll(static_cast<const MessagePoll *>(content)->poll_id, message_full_id,
                                std::move(reply_markup), std::move(promise));
 }
 
@@ -4145,6 +4200,8 @@ void merge_message_contents(Td *td, const MessageContent *old_content, MessageCo
       }
       break;
     }
+    case MessageContentType::WriteAccessAllowedByRequest:
+      break;
     default:
       UNREACHABLE();
       break;
@@ -4285,6 +4342,7 @@ bool merge_message_content_file_id(Td *td, MessageContent *message_content, File
     case MessageContentType::RequestedDialog:
     case MessageContentType::WebViewWriteAccessAllowed:
     case MessageContentType::SetBackground:
+    case MessageContentType::WriteAccessAllowedByRequest:
       LOG(ERROR) << "Receive new file " << new_file_id << " in a sent message of the type " << content_type;
       break;
     default:
@@ -4313,48 +4371,48 @@ static CustomEmojiId get_custom_emoji_id(const FormattedText &text) {
   return text.entities.empty() ? CustomEmojiId() : text.entities[0].custom_emoji_id;
 }
 
-void register_message_content(Td *td, const MessageContent *content, FullMessageId full_message_id,
+void register_message_content(Td *td, const MessageContent *content, MessageFullId message_full_id,
                               const char *source) {
   switch (content->get_type()) {
     case MessageContentType::Text: {
       auto text = static_cast<const MessageText *>(content);
       if (text->web_page_id.is_valid()) {
-        td->web_pages_manager_->register_web_page(text->web_page_id, full_message_id, source);
+        td->web_pages_manager_->register_web_page(text->web_page_id, message_full_id, source);
       } else if (can_be_animated_emoji(text->text)) {
-        td->stickers_manager_->register_emoji(text->text.text, get_custom_emoji_id(text->text), full_message_id,
+        td->stickers_manager_->register_emoji(text->text.text, get_custom_emoji_id(text->text), message_full_id,
                                               source);
       }
       return;
     }
     case MessageContentType::VideoNote:
       return td->video_notes_manager_->register_video_note(static_cast<const MessageVideoNote *>(content)->file_id,
-                                                           full_message_id, source);
+                                                           message_full_id, source);
     case MessageContentType::VoiceNote:
       return td->voice_notes_manager_->register_voice_note(static_cast<const MessageVoiceNote *>(content)->file_id,
-                                                           full_message_id, source);
+                                                           message_full_id, source);
     case MessageContentType::Poll:
-      return td->poll_manager_->register_poll(static_cast<const MessagePoll *>(content)->poll_id, full_message_id,
+      return td->poll_manager_->register_poll(static_cast<const MessagePoll *>(content)->poll_id, message_full_id,
                                               source);
     case MessageContentType::Dice: {
       auto dice = static_cast<const MessageDice *>(content);
-      return td->stickers_manager_->register_dice(dice->emoji, dice->dice_value, full_message_id, source);
+      return td->stickers_manager_->register_dice(dice->emoji, dice->dice_value, message_full_id, source);
     }
     case MessageContentType::GiftPremium:
       return td->stickers_manager_->register_premium_gift(static_cast<const MessageGiftPremium *>(content)->months,
-                                                          full_message_id, source);
+                                                          message_full_id, source);
     case MessageContentType::SuggestProfilePhoto:
       return td->contacts_manager_->register_suggested_profile_photo(
           static_cast<const MessageSuggestProfilePhoto *>(content)->photo);
     case MessageContentType::Story:
       return td->story_manager_->register_story(static_cast<const MessageStory *>(content)->story_full_id,
-                                                full_message_id, source);
+                                                message_full_id, source);
     default:
       return;
   }
 }
 
 void reregister_message_content(Td *td, const MessageContent *old_content, const MessageContent *new_content,
-                                FullMessageId full_message_id, const char *source) {
+                                MessageFullId message_full_id, const char *source) {
   auto old_content_type = old_content->get_type();
   auto new_content_type = new_content->get_type();
   if (old_content_type == new_content_type) {
@@ -4411,42 +4469,42 @@ void reregister_message_content(Td *td, const MessageContent *old_content, const
         return;
     }
   }
-  unregister_message_content(td, old_content, full_message_id, source);
-  register_message_content(td, new_content, full_message_id, source);
+  unregister_message_content(td, old_content, message_full_id, source);
+  register_message_content(td, new_content, message_full_id, source);
 }
 
-void unregister_message_content(Td *td, const MessageContent *content, FullMessageId full_message_id,
+void unregister_message_content(Td *td, const MessageContent *content, MessageFullId message_full_id,
                                 const char *source) {
   switch (content->get_type()) {
     case MessageContentType::Text: {
       auto text = static_cast<const MessageText *>(content);
       if (text->web_page_id.is_valid()) {
-        td->web_pages_manager_->unregister_web_page(text->web_page_id, full_message_id, source);
+        td->web_pages_manager_->unregister_web_page(text->web_page_id, message_full_id, source);
       } else if (can_be_animated_emoji(text->text)) {
-        td->stickers_manager_->unregister_emoji(text->text.text, get_custom_emoji_id(text->text), full_message_id,
+        td->stickers_manager_->unregister_emoji(text->text.text, get_custom_emoji_id(text->text), message_full_id,
                                                 source);
       }
       return;
     }
     case MessageContentType::VideoNote:
       return td->video_notes_manager_->unregister_video_note(static_cast<const MessageVideoNote *>(content)->file_id,
-                                                             full_message_id, source);
+                                                             message_full_id, source);
     case MessageContentType::VoiceNote:
       return td->voice_notes_manager_->unregister_voice_note(static_cast<const MessageVoiceNote *>(content)->file_id,
-                                                             full_message_id, source);
+                                                             message_full_id, source);
     case MessageContentType::Poll:
-      return td->poll_manager_->unregister_poll(static_cast<const MessagePoll *>(content)->poll_id, full_message_id,
+      return td->poll_manager_->unregister_poll(static_cast<const MessagePoll *>(content)->poll_id, message_full_id,
                                                 source);
     case MessageContentType::Dice: {
       auto dice = static_cast<const MessageDice *>(content);
-      return td->stickers_manager_->unregister_dice(dice->emoji, dice->dice_value, full_message_id, source);
+      return td->stickers_manager_->unregister_dice(dice->emoji, dice->dice_value, message_full_id, source);
     }
     case MessageContentType::GiftPremium:
       return td->stickers_manager_->unregister_premium_gift(static_cast<const MessageGiftPremium *>(content)->months,
-                                                            full_message_id, source);
+                                                            message_full_id, source);
     case MessageContentType::Story:
       return td->story_manager_->unregister_story(static_cast<const MessageStory *>(content)->story_full_id,
-                                                  full_message_id, source);
+                                                  message_full_id, source);
     default:
       return;
   }
@@ -5018,10 +5076,10 @@ unique_ptr<MessageContent> get_message_content(Td *td, FormattedText message,
     }
     case telegram_api::messageMediaStory::ID: {
       auto media = move_tl_object_as<telegram_api::messageMediaStory>(media_ptr);
-      auto dialog_id = DialogId(UserId(media->user_id_));
+      auto dialog_id = DialogId(media->peer_);
       auto story_id = StoryId(media->id_);
       auto story_full_id = StoryFullId(dialog_id, story_id);
-      if (!story_full_id.is_valid()) {
+      if (!story_full_id.is_server()) {
         LOG(ERROR) << "Receive " << to_string(media);
         break;
       }
@@ -5307,6 +5365,7 @@ unique_ptr<MessageContent> dup_message_content(Td *td, DialogId dialog_id, const
     case MessageContentType::RequestedDialog:
     case MessageContentType::WebViewWriteAccessAllowed:
     case MessageContentType::SetBackground:
+    case MessageContentType::WriteAccessAllowedByRequest:
       return nullptr;
     default:
       UNREACHABLE();
@@ -5508,6 +5567,9 @@ unique_ptr<MessageContent> get_action_message_content(Td *td, tl_object_ptr<tele
       if (action->app_ != nullptr && action->app_->get_id() == telegram_api::botApp::ID) {
         return td::make_unique<MessageWebViewWriteAccessAllowed>(
             WebApp(td, telegram_api::move_object_as<telegram_api::botApp>(action->app_), owner_dialog_id));
+      }
+      if (action->from_request_) {
+        return td::make_unique<MessageWriteAccessAllowedByRequest>();
       }
       return td::make_unique<MessageUnsupported>();
     }
@@ -5725,7 +5787,7 @@ tl_object_ptr<td_api::MessageContent> get_message_content_object(const MessageCo
     }
     case MessageContentType::LiveLocation: {
       const auto *m = static_cast<const MessageLiveLocation *>(content);
-      auto passed = max(G()->unix_time_cached() - message_date, 0);
+      auto passed = max(G()->unix_time() - message_date, 0);
       auto expires_in = max(0, m->period - passed);
       auto heading = expires_in == 0 ? 0 : m->heading;
       auto proximity_alert_radius = expires_in == 0 ? 0 : m->proximity_alert_radius;
@@ -5989,7 +6051,7 @@ tl_object_ptr<td_api::MessageContent> get_message_content_object(const MessageCo
       return make_tl_object<td_api::messageSuggestProfilePhoto>(std::move(photo));
     }
     case MessageContentType::WriteAccessAllowed:
-      return make_tl_object<td_api::messageBotWriteAccessAllowed>(nullptr);
+      return make_tl_object<td_api::messageBotWriteAccessAllowed>(nullptr, false);
     case MessageContentType::RequestedDialog: {
       const auto *m = static_cast<const MessageRequestedDialog *>(content);
       if (m->dialog_id.get_type() == DialogType::User) {
@@ -6011,7 +6073,7 @@ tl_object_ptr<td_api::MessageContent> get_message_content_object(const MessageCo
     }
     case MessageContentType::WebViewWriteAccessAllowed: {
       const auto *m = static_cast<const MessageWebViewWriteAccessAllowed *>(content);
-      return td_api::make_object<td_api::messageBotWriteAccessAllowed>(m->web_app.get_web_app_object(td));
+      return td_api::make_object<td_api::messageBotWriteAccessAllowed>(m->web_app.get_web_app_object(td), false);
     }
     case MessageContentType::SetBackground: {
       const auto *m = static_cast<const MessageSetBackground *>(content);
@@ -6024,6 +6086,8 @@ tl_object_ptr<td_api::MessageContent> get_message_content_object(const MessageCo
           td->messages_manager_->get_chat_id_object(m->story_full_id.get_dialog_id(), "messageStory"),
           m->story_full_id.get_story_id().get(), m->via_mention);
     }
+    case MessageContentType::WriteAccessAllowedByRequest:
+      return make_tl_object<td_api::messageBotWriteAccessAllowed>(nullptr, true);
     default:
       UNREACHABLE();
       return nullptr;
@@ -6449,6 +6513,7 @@ string get_message_content_search_text(const Td *td, const MessageContent *conte
     case MessageContentType::RequestedDialog:
     case MessageContentType::WebViewWriteAccessAllowed:
     case MessageContentType::SetBackground:
+    case MessageContentType::WriteAccessAllowedByRequest:
       return string();
     default:
       UNREACHABLE();
@@ -6473,7 +6538,7 @@ bool need_poll_message_content_extended_media(const MessageContent *content) {
   return static_cast<const MessageInvoice *>(content)->input_invoice.need_poll_extended_media();
 }
 
-void get_message_content_animated_emoji_click_sticker(const MessageContent *content, FullMessageId full_message_id,
+void get_message_content_animated_emoji_click_sticker(const MessageContent *content, MessageFullId message_full_id,
                                                       Td *td, Promise<td_api::object_ptr<td_api::sticker>> &&promise) {
   if (content->get_type() != MessageContentType::Text) {
     return promise.set_error(Status::Error(400, "Message is not an animated emoji message"));
@@ -6483,10 +6548,10 @@ void get_message_content_animated_emoji_click_sticker(const MessageContent *cont
   if (!can_be_animated_emoji(text)) {
     return promise.set_error(Status::Error(400, "Message is not an animated emoji message"));
   }
-  td->stickers_manager_->get_animated_emoji_click_sticker(text.text, full_message_id, std::move(promise));
+  td->stickers_manager_->get_animated_emoji_click_sticker(text.text, message_full_id, std::move(promise));
 }
 
-void on_message_content_animated_emoji_clicked(const MessageContent *content, FullMessageId full_message_id, Td *td,
+void on_message_content_animated_emoji_clicked(const MessageContent *content, MessageFullId message_full_id, Td *td,
                                                string &&emoji, string &&data) {
   if (content->get_type() != MessageContentType::Text) {
     return;
@@ -6497,7 +6562,7 @@ void on_message_content_animated_emoji_clicked(const MessageContent *content, Fu
   if (!text.entities.empty() || remove_emoji_modifiers(text.text) != emoji) {
     return;
   }
-  auto error = td->stickers_manager_->on_animated_emoji_message_clicked(std::move(emoji), full_message_id, data);
+  auto error = td->stickers_manager_->on_animated_emoji_message_clicked(std::move(emoji), message_full_id, data);
   if (error.is_error()) {
     LOG(WARNING) << "Failed to process animated emoji click with data \"" << data << "\": " << error;
   }
@@ -6754,6 +6819,8 @@ void add_message_content_dependencies(Dependencies &dependencies, const MessageC
       dependencies.add(content->story_full_id);
       break;
     }
+    case MessageContentType::WriteAccessAllowedByRequest:
+      break;
     default:
       UNREACHABLE();
       break;
@@ -6859,25 +6926,25 @@ void update_used_hashtags(Td *td, const MessageContent *content) {
   }
 }
 
-void recognize_message_content_speech(Td *td, const MessageContent *content, FullMessageId full_message_id,
+void recognize_message_content_speech(Td *td, const MessageContent *content, MessageFullId message_full_id,
                                       Promise<Unit> &&promise) {
   switch (content->get_type()) {
     case MessageContentType::VideoNote:
-      return td->video_notes_manager_->recognize_speech(full_message_id, std::move(promise));
+      return td->video_notes_manager_->recognize_speech(message_full_id, std::move(promise));
     case MessageContentType::VoiceNote:
-      return td->voice_notes_manager_->recognize_speech(full_message_id, std::move(promise));
+      return td->voice_notes_manager_->recognize_speech(message_full_id, std::move(promise));
     default:
       return promise.set_error(Status::Error(400, "Invalid message specified"));
   }
 }
 
-void rate_message_content_speech_recognition(Td *td, const MessageContent *content, FullMessageId full_message_id,
+void rate_message_content_speech_recognition(Td *td, const MessageContent *content, MessageFullId message_full_id,
                                              bool is_good, Promise<Unit> &&promise) {
   switch (content->get_type()) {
     case MessageContentType::VideoNote:
-      return td->video_notes_manager_->rate_speech_recognition(full_message_id, is_good, std::move(promise));
+      return td->video_notes_manager_->rate_speech_recognition(message_full_id, is_good, std::move(promise));
     case MessageContentType::VoiceNote:
-      return td->voice_notes_manager_->rate_speech_recognition(full_message_id, is_good, std::move(promise));
+      return td->voice_notes_manager_->rate_speech_recognition(message_full_id, is_good, std::move(promise));
     default:
       return promise.set_error(Status::Error(400, "Invalid message specified"));
   }

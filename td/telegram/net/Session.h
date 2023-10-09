@@ -14,6 +14,7 @@
 #include "td/mtproto/AuthKey.h"
 #include "td/mtproto/ConnectionManager.h"
 #include "td/mtproto/Handshake.h"
+#include "td/mtproto/MessageId.h"
 #include "td/mtproto/SessionConnection.h"
 
 #include "td/actor/actor.h"
@@ -78,16 +79,20 @@ class Session final
 
  private:
   struct Query final : private ListNode {
-    uint64 container_message_id;
-    NetQueryPtr query;
+    mtproto::MessageId container_message_id_;
+    NetQueryPtr net_query_;
 
-    bool ack = false;
-    bool unknown = false;
+    bool is_acknowledged_ = false;
+    bool is_unknown_ = false;
 
-    int8 connection_id;
-    double sent_at_;
-    Query(uint64 message_id, NetQueryPtr &&q, int8 connection_id, double sent_at)
-        : container_message_id(message_id), query(std::move(q)), connection_id(connection_id), sent_at_(sent_at) {
+    const int8 connection_id_;
+    const double sent_at_;
+
+    Query(mtproto::MessageId message_id, NetQueryPtr &&net_query, int8 connection_id, double sent_at)
+        : container_message_id_(message_id)
+        , net_query_(std::move(net_query))
+        , connection_id_(connection_id)
+        , sent_at_(sent_at) {
     }
 
     ListNode *get_list_node() {
@@ -127,8 +132,8 @@ class Session final
   double last_bind_success_timestamp_ = 0;  // time when auth_key and Session definitely was valid and authorized
   size_t dropped_size_ = 0;
 
-  FlatHashSet<uint64> unknown_queries_;
-  vector<int64> to_cancel_;
+  FlatHashSet<mtproto::MessageId, mtproto::MessageIdHash> unknown_queries_;
+  vector<mtproto::MessageId> to_cancel_message_ids_;
 
   // Do not invalidate iterators of these two containers!
   // TODO: better data structures
@@ -141,7 +146,7 @@ class Session final
     std::map<int8, VectorQueue<NetQueryPtr>, std::greater<>> queries_;
   };
   PriorityQueue pending_queries_;
-  std::map<uint64, Query> sent_queries_;
+  std::map<mtproto::MessageId, Query> sent_queries_;
   std::deque<NetQueryPtr> pending_invoke_after_queries_;
   ListNode sent_queries_list_;
 
@@ -177,9 +182,9 @@ class Session final
 
   struct ContainerInfo {
     size_t ref_cnt;
-    vector<uint64> message_ids;
+    vector<mtproto::MessageId> message_ids;
   };
-  FlatHashMap<uint64, ContainerInfo> sent_containers_;
+  FlatHashMap<mtproto::MessageId, ContainerInfo, mtproto::MessageIdHash> sent_containers_;
 
   friend class GenAuthKeyActor;
   struct HandshakeInfo {
@@ -210,33 +215,34 @@ class Session final
   void on_server_salt_updated() final;
   void on_server_time_difference_updated(bool force) final;
 
-  void on_session_created(uint64 unique_id, uint64 first_message_id) final;
+  void on_new_session_created(uint64 unique_id, mtproto::MessageId first_message_id) final;
   void on_session_failed(Status status) final;
 
-  void on_container_sent(uint64 container_message_id, vector<uint64> message_ids) final;
+  void on_container_sent(mtproto::MessageId container_message_id, vector<mtproto::MessageId> message_ids) final;
 
   Status on_update(BufferSlice packet) final;
 
-  void on_message_ack(uint64 message_id) final;
-  Status on_message_result_ok(uint64 message_id, BufferSlice packet, size_t original_size) final;
-  void on_message_result_error(uint64 message_id, int error_code, string message) final;
-  void on_message_failed(uint64 message_id, Status status) final;
+  void on_message_ack(mtproto::MessageId message_id) final;
+  Status on_message_result_ok(mtproto::MessageId message_id, BufferSlice packet, size_t original_size) final;
+  void on_message_result_error(mtproto::MessageId message_id, int error_code, string message) final;
+  void on_message_failed(mtproto::MessageId message_id, Status status) final;
 
-  void on_message_info(uint64 message_id, int32 state, uint64 answer_message_id, int32 answer_size) final;
+  void on_message_info(mtproto::MessageId message_id, int32 state, mtproto::MessageId answer_message_id,
+                       int32 answer_size, int32 source) final;
 
   Status on_destroy_auth_key() final;
 
   void flush_pending_invoke_after_queries();
   bool has_queries() const;
 
-  void dec_container(uint64 container_message_id, Query *query);
-  void cleanup_container(uint64 container_message_id, Query *query);
-  void mark_as_known(uint64 message_id, Query *query);
-  void mark_as_unknown(uint64 message_id, Query *query);
+  void dec_container(mtproto::MessageId container_message_id, Query *query);
+  void cleanup_container(mtproto::MessageId container_message_id, Query *query);
+  void mark_as_known(mtproto::MessageId message_id, Query *query);
+  void mark_as_unknown(mtproto::MessageId message_id, Query *query);
 
-  void on_message_ack_impl(uint64 container_message_id, int32 type);
-  void on_message_ack_impl_inner(uint64 message_id, int32 type, bool in_container);
-  void on_message_failed_inner(uint64 message_id, bool in_container);
+  void on_message_ack_impl(mtproto::MessageId container_message_id, int32 type);
+  void on_message_ack_impl_inner(mtproto::MessageId message_id, int32 type, bool in_container);
+  void on_message_failed_inner(mtproto::MessageId message_id, bool in_container);
 
   // send NetQueryPtr to parent
   void return_query(NetQueryPtr &&query);
@@ -251,7 +257,7 @@ class Session final
   void connection_online_update(double now, bool force);
   void connection_close(ConnectionInfo *info);
   void connection_flush(ConnectionInfo *info);
-  void connection_send_query(ConnectionInfo *info, NetQueryPtr &&net_query, uint64 message_id = 0);
+  void connection_send_query(ConnectionInfo *info, NetQueryPtr &&net_query, mtproto::MessageId message_id = {});
   bool need_send_bind_key() const;
   bool need_send_query() const;
   bool can_destroy_auth_key() const;

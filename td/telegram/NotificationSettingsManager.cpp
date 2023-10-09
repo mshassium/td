@@ -590,7 +590,7 @@ void NotificationSettingsManager::init() {
 
         VLOG(notifications) << "Loaded notification settings in " << scope << ": " << *current_settings;
 
-        schedule_scope_unmute(scope, current_settings->mute_until);
+        schedule_scope_unmute(scope, current_settings->mute_until, G()->unix_time());
 
         send_closure(G()->td(), &Td::send_update, get_update_scope_notification_settings_object(scope));
       }
@@ -628,13 +628,27 @@ int32 NotificationSettingsManager::get_scope_mute_until(NotificationSettingsScop
   return get_scope_notification_settings(scope)->mute_until;
 }
 
+std::pair<bool, bool> NotificationSettingsManager::get_scope_mute_stories(NotificationSettingsScope scope) const {
+  auto *settings = get_scope_notification_settings(scope);
+  return {settings->use_default_mute_stories, settings->mute_stories};
+}
+
 const unique_ptr<NotificationSound> &NotificationSettingsManager::get_scope_notification_sound(
     NotificationSettingsScope scope) const {
   return get_scope_notification_settings(scope)->sound;
 }
 
+const unique_ptr<NotificationSound> &NotificationSettingsManager::get_scope_story_notification_sound(
+    NotificationSettingsScope scope) const {
+  return get_scope_notification_settings(scope)->story_sound;
+}
+
 bool NotificationSettingsManager::get_scope_show_preview(NotificationSettingsScope scope) const {
   return get_scope_notification_settings(scope)->show_preview;
+}
+
+bool NotificationSettingsManager::get_scope_hide_story_sender(NotificationSettingsScope scope) const {
+  return get_scope_notification_settings(scope)->hide_story_sender;
 }
 
 bool NotificationSettingsManager::get_scope_disable_pinned_message_notifications(
@@ -714,11 +728,11 @@ void NotificationSettingsManager::on_scope_unmute(NotificationSettingsScope scop
     return;
   }
 
-  auto now = G()->unix_time();
-  if (notification_settings->mute_until > now) {
-    LOG(ERROR) << "Failed to unmute " << scope << " in " << now << ", will be unmuted in "
-               << notification_settings->mute_until;
-    schedule_scope_unmute(scope, notification_settings->mute_until);
+  auto unix_time = G()->unix_time();
+  if (notification_settings->mute_until > unix_time) {
+    LOG(INFO) << "Failed to unmute " << scope << " in " << unix_time << ", will be unmuted in "
+              << notification_settings->mute_until;
+    schedule_scope_unmute(scope, notification_settings->mute_until, unix_time);
     return;
   }
 
@@ -810,10 +824,10 @@ bool NotificationSettingsManager::update_scope_notification_settings(Notificatio
   return need_update_server;
 }
 
-void NotificationSettingsManager::schedule_scope_unmute(NotificationSettingsScope scope, int32 mute_until) {
-  auto now = G()->unix_time_cached();
-  if (mute_until >= now && mute_until < now + 366 * 86400) {
-    scope_unmute_timeout_.set_timeout_in(static_cast<int64>(scope) + 1, mute_until - now + 1);
+void NotificationSettingsManager::schedule_scope_unmute(NotificationSettingsScope scope, int32 mute_until,
+                                                        int32 unix_time) {
+  if (mute_until >= unix_time && mute_until < unix_time + 366 * 86400) {
+    scope_unmute_timeout_.set_timeout_in(static_cast<int64>(scope) + 1, mute_until - unix_time + 1);
   } else {
     scope_unmute_timeout_.cancel_timeout(static_cast<int64>(scope) + 1);
   }
@@ -832,7 +846,7 @@ void NotificationSettingsManager::update_scope_unmute_timeout(NotificationSettin
   }
   CHECK(old_mute_until >= 0);
 
-  schedule_scope_unmute(scope, new_mute_until);
+  schedule_scope_unmute(scope, new_mute_until, G()->unix_time());
 
   auto was_muted = old_mute_until != 0;
   auto is_muted = new_mute_until != 0;

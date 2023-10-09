@@ -9,8 +9,8 @@
 #include "td/telegram/ChannelId.h"
 #include "td/telegram/ChatId.h"
 #include "td/telegram/DialogId.h"
-#include "td/telegram/FullMessageId.h"
 #include "td/telegram/InputGroupCallId.h"
+#include "td/telegram/MessageFullId.h"
 #include "td/telegram/MessageId.h"
 #include "td/telegram/PtsManager.h"
 #include "td/telegram/telegram_api.h"
@@ -125,7 +125,7 @@ class UpdatesManager final : public Actor {
 
   static vector<DialogId> get_chat_dialog_ids(const telegram_api::Updates *updates_ptr);
 
-  static int32 get_update_edit_message_pts(const telegram_api::Updates *updates_ptr, FullMessageId full_message_id);
+  static int32 get_update_edit_message_pts(const telegram_api::Updates *updates_ptr, MessageFullId message_full_id);
 
   using TranscribedAudioHandler =
       std::function<void(Result<telegram_api::object_ptr<telegram_api::updateTranscribedAudio>>)>;
@@ -461,6 +461,8 @@ class UpdatesManager final : public Actor {
 
   bool is_acceptable_update(const telegram_api::Update *update) const;
 
+  static int32 fix_short_message_flags(int32 flags);
+
   void on_update(tl_object_ptr<telegram_api::updateNewMessage> update, Promise<Unit> &&promise);
   void on_update(tl_object_ptr<telegram_api::updateMessageID> update, Promise<Unit> &&promise);
   void on_update(tl_object_ptr<telegram_api::updateReadMessagesContents> update, Promise<Unit> &&promise);
@@ -624,9 +626,15 @@ class UpdatesManager final : public Actor {
 
   void on_update(tl_object_ptr<telegram_api::updateReadStories> update, Promise<Unit> &&promise);
 
-  // unsupported updates
+  void on_update(tl_object_ptr<telegram_api::updateStoriesStealthMode> update, Promise<Unit> &&promise);
+
+  void on_update(tl_object_ptr<telegram_api::updateSentStoryReaction> update, Promise<Unit> &&promise);
 
   void on_update(tl_object_ptr<telegram_api::updateStoryID> update, Promise<Unit> &&promise);
+
+  void on_update(tl_object_ptr<telegram_api::updateNewAuthorization> update, Promise<Unit> &&promise);
+
+  // unsupported updates
 };
 
 }  // namespace td

@@ -30,6 +30,7 @@
 
 namespace td {
 
+class AccountManager;
 class AnimationsManager;
 class AttachMenuManager;
 class AuthManager;
@@ -54,6 +55,7 @@ class NotificationManager;
 class NotificationSettingsManager;
 class OptionManager;
 class PasswordManager;
+class ReactionManager;
 class SecretChatsManager;
 class SponsoredMessageManager;
 class StateManager;
@@ -90,8 +92,7 @@ class Global final : public ActorContext {
 
   void log_out(Slice reason);
 
-  void close_all(Promise<> on_finished);
-  void close_and_destroy_all(Promise<> on_finished);
+  void close_all(bool destroy_flag, Promise<> on_finished);
 
   Status init(ActorId<Td> td, unique_ptr<TdDb> td_db_ptr) TD_WARN_UNUSED_RESULT;
 
@@ -144,20 +145,11 @@ class Global final : public ActorContext {
   bool is_server_time_reliable() const {
     return server_time_difference_was_updated_.load(std::memory_order_relaxed);
   }
-  double to_server_time(double now) const {
-    return now + get_server_time_difference();
-  }
   double server_time() const {
-    return to_server_time(Time::now());
-  }
-  double server_time_cached() const {
-    return to_server_time(Time::now_cached());
+    return Time::now() + get_server_time_difference();
   }
   int32 unix_time() const {
     return to_unix_time(server_time());
-  }
-  int32 unix_time_cached() const {
-    return to_unix_time(server_time_cached());
   }
 
   void update_server_time_difference(double diff, bool force);
@@ -181,6 +173,13 @@ class Global final : public ActorContext {
 
   ActorId<Td> td() const {
     return td_;
+  }
+
+  ActorId<AccountManager> account_manager() const {
+    return account_manager_;
+  }
+  void set_account_manager(ActorId<AccountManager> account_manager) {
+    account_manager_ = account_manager;
   }
 
   ActorId<AnimationsManager> animations_manager() const {
@@ -329,6 +328,13 @@ class Global final : public ActorContext {
   }
   void set_password_manager(ActorId<PasswordManager> password_manager) {
     password_manager_ = password_manager;
+  }
+
+  ActorId<ReactionManager> reaction_manager() const {
+    return reaction_manager_;
+  }
+  void set_reaction_manager(ActorId<ReactionManager> reaction_manager) {
+    reaction_manager_ = reaction_manager;
   }
 
   ActorId<SecretChatsManager> secret_chats_manager() const {
@@ -509,6 +515,7 @@ class Global final : public ActorContext {
   unique_ptr<TdDb> td_db_;
 
   ActorId<Td> td_;
+  ActorId<AccountManager> account_manager_;
   ActorId<AnimationsManager> animations_manager_;
   ActorId<AttachMenuManager> attach_menu_manager_;
   ActorId<AuthManager> auth_manager_;
@@ -530,6 +537,7 @@ class Global final : public ActorContext {
   ActorId<NotificationManager> notification_manager_;
   ActorId<NotificationSettingsManager> notification_settings_manager_;
   ActorId<PasswordManager> password_manager_;
+  ActorId<ReactionManager> reaction_manager_;
   ActorId<SecretChatsManager> secret_chats_manager_;
   ActorId<SponsoredMessageManager> sponsored_message_manager_;
   ActorId<StickersManager> stickers_manager_;

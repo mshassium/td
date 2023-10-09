@@ -11,6 +11,7 @@
 #include "td/db/DbKey.h"
 #include "td/db/KeyValueSyncInterface.h"
 
+#include "td/utils/common.h"
 #include "td/utils/Promise.h"
 #include "td/utils/Slice.h"
 #include "td/utils/Status.h"
@@ -71,10 +72,11 @@ class TdDb {
     vector<BinlogEvent> secret_chat_events;
     vector<BinlogEvent> web_page_events;
     vector<BinlogEvent> save_app_log_events;
-    vector<BinlogEvent> to_poll_manager;
+    vector<BinlogEvent> to_account_manager;
     vector<BinlogEvent> to_messages_manager;
     vector<BinlogEvent> to_notification_manager;
     vector<BinlogEvent> to_notification_settings_manager;
+    vector<BinlogEvent> to_poll_manager;
     vector<BinlogEvent> to_story_manager;
 
     int64 since_last_open = 0;
@@ -132,8 +134,7 @@ class TdDb {
 
   void flush_all();
 
-  void close_all(Promise<> on_finished);
-  void close_and_destroy_all(Promise<> on_finished);
+  void close(int32 scheduler_id, bool destroy_flag, Promise<Unit> on_finished);
 
   MessageDbSyncInterface *get_message_db_sync();
   MessageDbAsyncInterface *get_message_db_async();
@@ -188,7 +189,7 @@ class TdDb {
   Status init_sqlite(const Parameters &parameters, const DbKey &key, const DbKey &old_key,
                      BinlogKeyValue<Binlog> &binlog_pmc);
 
-  void do_close(Promise<> on_finished, bool destroy_flag);
+  void do_close(bool destroy_flag, Promise<Unit> on_finished);
 };
 
 }  // namespace td

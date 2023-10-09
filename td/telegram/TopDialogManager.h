@@ -37,6 +37,8 @@ class TopDialogManager final : public Actor {
 
   void get_top_dialogs(TopDialogCategory category, int32 limit, Promise<td_api::object_ptr<td_api::chats>> &&promise);
 
+  int is_top_dialog(TopDialogCategory category, size_t limit, DialogId dialog_id) const;
+
   void update_rating_e_decay();
 
   void update_is_enabled(bool is_enabled);
@@ -52,6 +54,7 @@ class TopDialogManager final : public Actor {
 
   bool is_active_ = false;
   bool is_enabled_ = true;
+  bool is_synchronized_ = false;
   int32 rating_e_decay_ = 241920;
 
   bool have_toggle_top_peers_query_ = false;
@@ -96,7 +99,7 @@ class TopDialogManager final : public Actor {
   std::array<TopDialogs, static_cast<size_t>(TopDialogCategory::Size)> by_category_;
 
   double rating_add(double now, double rating_timestamp) const;
-  double current_rating_add(double rating_timestamp) const;
+  double current_rating_add(double server_time, double rating_timestamp) const;
   void normalize_rating();
 
   bool set_is_enabled(bool is_enabled);

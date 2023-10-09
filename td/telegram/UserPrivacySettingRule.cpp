@@ -295,9 +295,14 @@ Result<UserPrivacySettingRules> UserPrivacySettingRules::get_user_privacy_settin
   }
   UserPrivacySettingRules result;
   switch (settings->get_id()) {
-    case td_api::storyPrivacySettingsEveryone::ID:
+    case td_api::storyPrivacySettingsEveryone::ID: {
+      auto user_ids = std::move(static_cast<td_api::storyPrivacySettingsEveryone &>(*settings).except_user_ids_);
+      if (!user_ids.empty()) {
+        result.rules_.emplace_back(td, td_api::userPrivacySettingRuleRestrictUsers(std::move(user_ids)));
+      }
       result.rules_.emplace_back(td, td_api::userPrivacySettingRuleAllowAll());
       break;
+    }
     case td_api::storyPrivacySettingsContacts::ID: {
       auto user_ids = std::move(static_cast<td_api::storyPrivacySettingsContacts &>(*settings).except_user_ids_);
       if (!user_ids.empty()) {
@@ -312,8 +317,8 @@ Result<UserPrivacySettingRules> UserPrivacySettingRules::get_user_privacy_settin
       result.rules_.push_back(std::move(rule));
       break;
     }
-    case td_api::storyPrivacySettingsSelectedContacts::ID: {
-      auto user_ids = std::move(static_cast<td_api::storyPrivacySettingsSelectedContacts &>(*settings).user_ids_);
+    case td_api::storyPrivacySettingsSelectedUsers::ID: {
+      auto user_ids = std::move(static_cast<td_api::storyPrivacySettingsSelectedUsers &>(*settings).user_ids_);
       result.rules_.emplace_back(td, td_api::userPrivacySettingRuleAllowUsers(std::move(user_ids)));
       break;
     }
@@ -337,6 +342,11 @@ td_api::object_ptr<td_api::StoryPrivacySettings> UserPrivacySettingRules::get_st
   if (rules_.size() == 1u && rules_[0].type_ == UserPrivacySettingRule::Type::AllowAll) {
     return td_api::make_object<td_api::storyPrivacySettingsEveryone>();
   }
+  if (rules_.size() == 2u && rules_[0].type_ == UserPrivacySettingRule::Type::RestrictUsers &&
+      rules_[1].type_ == UserPrivacySettingRule::Type::AllowAll) {
+    return td_api::make_object<td_api::storyPrivacySettingsEveryone>(
+        td->contacts_manager_->get_user_ids_object(rules_[0].user_ids_, "storyPrivacySettingsEveryone"));
+  }
   if (rules_.size() == 1u && rules_[0].type_ == UserPrivacySettingRule::Type::AllowContacts) {
     return td_api::make_object<td_api::storyPrivacySettingsContacts>();
   }
@@ -349,10 +359,10 @@ td_api::object_ptr<td_api::StoryPrivacySettings> UserPrivacySettingRules::get_st
     return td_api::make_object<td_api::storyPrivacySettingsCloseFriends>();
   }
   if (rules_.size() == 1u && rules_[0].type_ == UserPrivacySettingRule::Type::AllowUsers) {
-    return td_api::make_object<td_api::storyPrivacySettingsSelectedContacts>(
-        td->contacts_manager_->get_user_ids_object(rules_[0].user_ids_, "storyPrivacySettingsSelectedContacts"));
+    return td_api::make_object<td_api::storyPrivacySettingsSelectedUsers>(
+        td->contacts_manager_->get_user_ids_object(rules_[0].user_ids_, "storyPrivacySettingsSelectedUsers"));
   }
-  return td_api::make_object<td_api::storyPrivacySettingsSelectedContacts>();
+  return td_api::make_object<td_api::storyPrivacySettingsSelectedUsers>();
 }
 
 vector<telegram_api::object_ptr<telegram_api::InputPrivacyRule>> UserPrivacySettingRules::get_input_privacy_rules(

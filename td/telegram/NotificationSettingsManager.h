@@ -10,7 +10,7 @@
 #include "td/telegram/DialogNotificationSettings.h"
 #include "td/telegram/files/FileId.h"
 #include "td/telegram/files/FileSourceId.h"
-#include "td/telegram/FullMessageId.h"
+#include "td/telegram/MessageFullId.h"
 #include "td/telegram/MessageId.h"
 #include "td/telegram/NotificationSettingsScope.h"
 #include "td/telegram/ScopeNotificationSettings.h"
@@ -26,6 +26,7 @@
 #include "td/utils/Status.h"
 
 #include <memory>
+#include <utility>
 
 namespace td {
 
@@ -46,9 +47,15 @@ class NotificationSettingsManager final : public Actor {
 
   int32 get_scope_mute_until(NotificationSettingsScope scope) const;
 
+  std::pair<bool, bool> get_scope_mute_stories(NotificationSettingsScope scope) const;
+
   const unique_ptr<NotificationSound> &get_scope_notification_sound(NotificationSettingsScope scope) const;
 
+  const unique_ptr<NotificationSound> &get_scope_story_notification_sound(NotificationSettingsScope scope) const;
+
   bool get_scope_show_preview(NotificationSettingsScope scope) const;
+
+  bool get_scope_hide_story_sender(NotificationSettingsScope scope) const;
 
   bool get_scope_disable_pinned_message_notifications(NotificationSettingsScope scope) const;
 
@@ -181,7 +188,7 @@ class NotificationSettingsManager final : public Actor {
 
   void update_scope_notification_settings_on_server(NotificationSettingsScope scope, uint64 log_event_id);
 
-  void schedule_scope_unmute(NotificationSettingsScope scope, int32 mute_until);
+  void schedule_scope_unmute(NotificationSettingsScope scope, int32 mute_until, int32 unix_time);
 
   void update_scope_unmute_timeout(NotificationSettingsScope scope, int32 &old_mute_until, int32 new_mute_until);
 
@@ -218,7 +225,7 @@ class NotificationSettingsManager final : public Actor {
   vector<Promise<Unit>> reload_saved_ringtones_queries_;
   vector<Promise<Unit>> repair_saved_ringtones_queries_;
 
-  FlatHashMap<FullMessageId, vector<Promise<Unit>>, FullMessageIdHash> get_dialog_notification_settings_queries_;
+  FlatHashMap<MessageFullId, vector<Promise<Unit>>, MessageFullIdHash> get_dialog_notification_settings_queries_;
 };
 
 }  // namespace td

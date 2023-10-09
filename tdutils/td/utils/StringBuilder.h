@@ -13,12 +13,14 @@
 #include <cstdlib>
 #include <memory>
 #include <type_traits>
+#include <utility>
 
 namespace td {
 
 class StringBuilder {
  public:
   explicit StringBuilder(MutableSlice slice, bool use_buffer = false);
+
   StringBuilder() : StringBuilder({}, true) {
   }
 
@@ -41,6 +43,8 @@ class StringBuilder {
     }
     *current_ptr_++ = c;
   }
+
+  void append_char(size_t count, char c);
 
   MutableCSlice as_cslice() {
     if (current_ptr_ >= end_ptr_ + RESERVED_SIZE) {
@@ -125,6 +129,36 @@ class StringBuilder {
   }
 
   StringBuilder &operator<<(const void *ptr);
+
+  template <class A, class B>
+  StringBuilder &operator<<(const std::pair<A, B> &p) {
+    return *this << '[' << p.first << ';' << p.second << ']';
+  }
+
+  template <class T>
+  StringBuilder &operator<<(const vector<T> &v) {
+    *this << '{';
+    if (!v.empty()) {
+      *this << v[0];
+      size_t len = v.size();
+      for (size_t i = 1; i < len; i++) {
+        *this << ", " << v[i];
+      }
+    }
+    return *this << '}';
+  }
+
+  StringBuilder &operator<<(const vector<bool> &v) {
+    *this << '{';
+    if (!v.empty()) {
+      *this << v[0];
+      size_t len = v.size();
+      for (size_t i = 1; i < len; i++) {
+        *this << ", " << static_cast<bool>(v[i]);
+      }
+    }
+    return *this << '}';
+  }
 
  private:
   char *begin_ptr_;

@@ -57,8 +57,6 @@
 #include "td/utils/tl_helpers.h"
 #include "td/utils/tl_parsers.h"
 
-#include <algorithm>
-
 namespace td {
 
 class GetInlineBotResultsQuery final : public Td::ResultHandler {
@@ -176,7 +174,7 @@ class RequestSimpleWebViewQuery final : public Td::ResultHandler {
   explicit RequestSimpleWebViewQuery(Promise<string> &&promise) : promise_(std::move(promise)) {
   }
 
-  void send(tl_object_ptr<telegram_api::InputUser> &&input_user, const string &url,
+  void send(tl_object_ptr<telegram_api::InputUser> &&input_user, string url,
             const td_api::object_ptr<td_api::themeParameters> &theme, string &&platform) {
     tl_object_ptr<telegram_api::dataJSON> theme_parameters;
     int32 flags = 0;
@@ -186,17 +184,30 @@ class RequestSimpleWebViewQuery final : public Td::ResultHandler {
       theme_parameters = make_tl_object<telegram_api::dataJSON>(string());
       theme_parameters->data_ = ThemeManager::get_theme_parameters_json_string(theme, false);
     }
+    string start_parameter;
     if (ends_with(url, "#kb")) {
       // a URL from keyboard button
+      url.resize(url.size() - 3);
+      flags |= telegram_api::messages_requestSimpleWebView::URL_MASK;
     } else if (ends_with(url, "#iq")) {
       // a URL from inline query results button
+      url.resize(url.size() - 3);
       flags |= telegram_api::messages_requestSimpleWebView::FROM_SWITCH_WEBVIEW_MASK;
+      flags |= telegram_api::messages_requestSimpleWebView::URL_MASK;
+    } else if (url.empty()) {
+      flags |= telegram_api::messages_requestSimpleWebView::FROM_SIDE_MENU_MASK;
+    } else if (begins_with(url, "start://")) {
+      start_parameter = url.substr(8);
+      url = string();
+
+      flags |= telegram_api::messages_requestSimpleWebView::FROM_SIDE_MENU_MASK;
+      flags |= telegram_api::messages_requestSimpleWebView::START_PARAM_MASK;
     } else {
       return on_error(Status::Error(400, "Invalid URL specified"));
     }
-    send_query(G()->net_query_creator().create(telegram_api::messages_requestSimpleWebView(
-        flags, false /*ignored*/, std::move(input_user), url.substr(0, url.size() - 3), std::move(theme_parameters),
-        platform)));
+    send_query(G()->net_query_creator().create(
+        telegram_api::messages_requestSimpleWebView(flags, false /*ignored*/, false /*ignored*/, std::move(input_user),
+                                                    url, start_parameter, std::move(theme_parameters), platform)));
   }
 
   void on_result(BufferSlice packet) final {
@@ -547,7 +558,7 @@ void InlineQueriesManager::get_simple_web_view_url(UserId bot_user_id, string &&
   TRY_RESULT_PROMISE(promise, bot_data, td_->contacts_manager_->get_bot_data(bot_user_id));
 
   td_->create_handler<RequestSimpleWebViewQuery>(std::move(promise))
-      ->send(std::move(input_user), url, theme, std::move(platform));
+      ->send(std::move(input_user), std::move(url), theme, std::move(platform));
 }
 
 void InlineQueriesManager::send_web_view_data(UserId bot_user_id, string &&button_text, string &&data,
@@ -1084,8 +1095,8 @@ void InlineQueriesManager::loop() {
     pending_inline_query_ = nullptr;
   } else {
     if (!has_timeout()) {
-      LOG(INFO) << "Schedule send inline query " << pending_inline_query_->query_hash << " at "
-                << G()->to_server_time(next_inline_query_time_);
+      LOG(INFO) << "Schedule send inline query " << pending_inline_query_->query_hash << " in "
+                << next_inline_query_time_ - now;
       set_timeout_at(next_inline_query_time_);
     }
   }
@@ -2170,17 +2181,8 @@ bool InlineQueriesManager::update_bot_usage(UserId bot_user_id) {
     return false;
   }
 
-  auto it = std::find(recently_used_bot_user_ids_.begin(), recently_used_bot_user_ids_.end(), bot_user_id);
-  if (it == recently_used_bot_user_ids_.end()) {
-    if (static_cast<int32>(recently_used_bot_user_ids_.size()) == MAX_RECENT_INLINE_BOTS) {
-      CHECK(!recently_used_bot_user_ids_.empty());
-      recently_used_bot_user_ids_.back() = bot_user_id;
-    } else {
-      recently_used_bot_user_ids_.push_back(bot_user_id);
-    }
-    it = recently_used_bot_user_ids_.end() - 1;
-  }
-  std::rotate(recently_used_bot_user_ids_.begin(), it, it + 1);
+  add_to_top(recently_used_bot_user_ids_, MAX_RECENT_INLINE_BOTS, bot_user_id);
+
   return true;
 }
 

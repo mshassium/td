@@ -10,6 +10,7 @@
 #include "td/telegram/StoryId.h"
 
 #include "td/utils/common.h"
+#include "td/utils/HashTableUtils.h"
 #include "td/utils/StringBuilder.h"
 
 namespace td {
@@ -44,6 +45,10 @@ struct StoryFullId {
 
   bool is_valid() const {
     return dialog_id.is_valid() && story_id.is_valid();
+  }
+
+  bool is_server() const {
+    return dialog_id.is_valid() && story_id.is_server();
   }
 
   template <class StorerT>
