@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -93,7 +93,7 @@ class SessionCallback final : public Session::Callback {
 
 SessionProxy::SessionProxy(unique_ptr<Callback> callback, std::shared_ptr<AuthDataShared> shared_auth_data,
                            bool is_primary, bool is_main, bool allow_media_only, bool is_media, bool use_pfs,
-                           bool persist_tmp_auth_key, bool is_cdn, bool need_destroy)
+                           bool persist_tmp_auth_key, bool is_cdn, bool need_destroy_auth_key)
     : callback_(std::move(callback))
     , auth_data_(std::move(shared_auth_data))
     , is_primary_(is_primary)
@@ -103,7 +103,7 @@ SessionProxy::SessionProxy(unique_ptr<Callback> callback, std::shared_ptr<AuthDa
     , use_pfs_(use_pfs)
     , persist_tmp_auth_key_(use_pfs && persist_tmp_auth_key)
     , is_cdn_(is_cdn)
-    , need_destroy_(need_destroy) {
+    , need_destroy_auth_key_(need_destroy_auth_key) {
 }
 
 void SessionProxy::start_up() {
@@ -166,19 +166,9 @@ void SessionProxy::update_main_flag(bool is_main) {
   if (is_main_ == is_main) {
     return;
   }
-  LOG(INFO) << "Update " << get_name() << " is_main to " << is_main;
+  LOG(INFO) << "Update is_main to " << is_main;
   is_main_ = is_main;
-  close_session();
-  open_session();
-}
-
-void SessionProxy::update_destroy(bool need_destroy) {
-  if (need_destroy_ == need_destroy) {
-    LOG(INFO) << "Ignore reduntant update_destroy(" << need_destroy << ")";
-    return;
-  }
-  need_destroy_ = need_destroy;
-  close_session();
+  close_session("update_main_flag");
   open_session();
 }
 
@@ -186,19 +176,20 @@ void SessionProxy::on_failed() {
   if (session_generation_ != get_link_token()) {
     return;
   }
-  close_session();
+  close_session("on_failed");
   open_session();
 }
 
 void SessionProxy::update_mtproto_header() {
-  close_session();
+  close_session("update_mtproto_header");
   open_session();
 }
 
 void SessionProxy::on_closed() {
 }
 
-void SessionProxy::close_session() {
+void SessionProxy::close_session(const char *source) {
+  LOG(INFO) << "Close session from " << source;
   send_closure(std::move(session_), &Session::close);
   session_generation_++;
 }
@@ -215,7 +206,7 @@ void SessionProxy::open_session(bool force) {
     if (force) {
       return true;
     }
-    if (need_destroy_) {
+    if (need_destroy_auth_key_) {
       return auth_key_state_ != AuthKeyState::Empty;
     }
     if (is_main_) {
@@ -246,15 +237,15 @@ void SessionProxy::open_session(bool force) {
   session_ = create_actor<Session>(
       name,
       make_unique<SessionCallback>(actor_shared(this, session_generation_), dc_id, allow_media_only_, is_media_, hash),
-      auth_data_, raw_dc_id, int_dc_id, is_primary_, is_main_, use_pfs_, persist_tmp_auth_key_, is_cdn_, need_destroy_,
-      tmp_auth_key_, server_salts_);
+      auth_data_, raw_dc_id, int_dc_id, is_primary_, is_main_, use_pfs_, persist_tmp_auth_key_, is_cdn_,
+      need_destroy_auth_key_, tmp_auth_key_, server_salts_);
 }
 
 void SessionProxy::update_auth_key_state() {
   auto old_auth_key_state = auth_key_state_;
   auth_key_state_ = get_auth_key_state(auth_data_->get_auth_key());
   if (auth_key_state_ != old_auth_key_state && old_auth_key_state == AuthKeyState::OK) {
-    close_session();
+    close_session("update_auth_key_state");
   }
   open_session();
   if (session_.empty() || auth_key_state_ != AuthKeyState::OK) {

@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -168,6 +168,10 @@ void ConnectionCreator::add_proxy(int32 old_proxy_id, string server, int32 port,
     G()->td_db()->get_binlog_pmc()->erase(get_proxy_used_database_key(old_proxy_id));
     proxy_last_used_date_.erase(old_proxy_id);
     proxy_last_used_saved_date_.erase(old_proxy_id);
+  } else {
+#if TD_EMSCRIPTEN || TD_DARWIN_WATCH_OS
+    return promise.set_error(Status::Error(400, "The method is unsupported for the platform"));
+#endif
   }
 
   auto proxy_id = [&] {
@@ -1029,6 +1033,10 @@ void ConnectionCreator::on_dc_options(DcOptions new_dc_options) {
   VLOG(connections) << "SAVE " << new_dc_options;
   G()->td_db()->get_binlog_pmc()->set("dc_options", serialize(new_dc_options));
   dc_options_set_.reset();
+  add_dc_options(std::move(new_dc_options));
+}
+
+void ConnectionCreator::add_dc_options(DcOptions &&new_dc_options) {
   dc_options_set_.add_dc_options(get_default_dc_options(G()->is_test_dc()));
 #if !TD_EMSCRIPTEN  // FIXME
   dc_options_set_.add_dc_options(std::move(new_dc_options));
@@ -1087,9 +1095,24 @@ void ConnectionCreator::start_up() {
   if (status.is_error()) {
     on_dc_options(DcOptions());
   } else {
-    on_dc_options(std::move(dc_options));
+    add_dc_options(std::move(dc_options));
   }
 
+  if (G()->td_db()->get_binlog_pmc()->get("proxy_max_id") != "2" ||
+      !G()->td_db()->get_binlog_pmc()->get(get_proxy_database_key(1)).empty()) {
+    // don't need to init proxies if they have never been added
+    init_proxies();
+  } else {
+    max_proxy_id_ = 2;
+  }
+
+  ref_cnt_guard_ = create_reference(-1);
+
+  is_inited_ = true;
+  loop();
+}
+
+void ConnectionCreator::init_proxies() {
   auto proxy_info = G()->td_db()->get_binlog_pmc()->prefix_get("proxy");
   auto it = proxy_info.find("_max_id");
   if (it != proxy_info.end()) {
@@ -1117,6 +1140,8 @@ void ConnectionCreator::start_up() {
       log_event_parse(proxies_[proxy_id], info.second).ensure();
       if (proxies_[proxy_id].type() == Proxy::Type::None) {
         LOG_IF(ERROR, proxy_id != 1) << "Have empty proxy " << proxy_id;
+        G()->td_db()->get_binlog_pmc()->erase(get_proxy_database_key(proxy_id));
+        G()->td_db()->get_binlog_pmc()->erase(get_proxy_used_database_key(proxy_id));
         proxies_.erase(proxy_id);
         if (active_proxy_id_ == proxy_id) {
           set_active_proxy_id(0);
@@ -1145,11 +1170,6 @@ void ConnectionCreator::start_up() {
 
     on_proxy_changed(true);
   }
-
-  ref_cnt_guard_ = create_reference(-1);
-
-  is_inited_ = true;
-  loop();
 }
 
 void ConnectionCreator::hangup_shared() {

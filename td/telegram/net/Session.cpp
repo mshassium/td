@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -233,7 +233,7 @@ bool Session::PriorityQueue::empty() const {
 
 Session::Session(unique_ptr<Callback> callback, std::shared_ptr<AuthDataShared> shared_auth_data, int32 raw_dc_id,
                  int32 dc_id, bool is_primary, bool is_main, bool use_pfs, bool persist_tmp_auth_key, bool is_cdn,
-                 bool need_destroy, const mtproto::AuthKey &tmp_auth_key,
+                 bool need_destroy_auth_key, const mtproto::AuthKey &tmp_auth_key,
                  const vector<mtproto::ServerSalt> &server_salts)
     : raw_dc_id_(raw_dc_id)
     , dc_id_(dc_id)
@@ -241,9 +241,9 @@ Session::Session(unique_ptr<Callback> callback, std::shared_ptr<AuthDataShared> 
     , is_main_(is_main)
     , persist_tmp_auth_key_(use_pfs && persist_tmp_auth_key)
     , is_cdn_(is_cdn)
-    , need_destroy_(need_destroy) {
-  VLOG(dc) << "Start connection " << tag("need_destroy", need_destroy_);
-  if (need_destroy_) {
+    , need_destroy_auth_key_(need_destroy_auth_key) {
+  VLOG(dc) << "Start connection " << tag("need_destroy_auth_key", need_destroy_auth_key_);
+  if (need_destroy_auth_key_) {
     use_pfs = false;
     CHECK(!is_cdn);
   }
@@ -292,7 +292,7 @@ bool Session::is_high_loaded() {
 }
 
 bool Session::can_destroy_auth_key() const {
-  return need_destroy_;
+  return need_destroy_auth_key_;
 }
 
 void Session::start_up() {
@@ -590,10 +590,8 @@ Status Session::on_pong() {
           break;
         }
       }
-      if (status.is_error()) {
-        return status;
-      }
     }
+    return status;
   }
   return Status::OK();
 }
@@ -637,7 +635,7 @@ void Session::on_closed(Status status) {
       auth_data_.drop_main_auth_key();
       on_auth_key_updated();
       on_session_failed(status.clone());
-    } else if (need_destroy_) {
+    } else if (need_destroy_auth_key_) {
       LOG(WARNING) << "Session connection was closed, because main auth_key has been successfully destroyed";
       auth_data_.drop_main_auth_key();
       on_auth_key_updated();
@@ -1049,6 +1047,8 @@ void Session::on_message_info(mtproto::MessageId message_id, int32 state, mtprot
       return;
     }
   }
+  LOG(INFO) << "Receive info about " << message_id << " with state = " << state << " and answer " << answer_message_id
+            << " from " << source;
   if (message_id != mtproto::MessageId()) {
     if (it == sent_queries_.end()) {
       return;
@@ -1345,8 +1345,8 @@ bool Session::connection_send_check_main_key(ConnectionInfo *info) {
   LOG(INFO) << "Check main key";
   being_checked_main_auth_key_id_ = key_id;
   last_check_query_id_ = UniqueId::next(UniqueId::BindKey);
-  NetQueryPtr query = G()->net_query_creator().create(last_check_query_id_, telegram_api::help_getNearestDc(), {},
-                                                      DcId::main(), NetQuery::Type::Common, NetQuery::AuthFlag::On);
+  NetQueryPtr query = G()->net_query_creator().create(last_check_query_id_, nullptr, telegram_api::help_getNearestDc(),
+                                                      {}, DcId::main(), NetQuery::Type::Common, NetQuery::AuthFlag::On);
   query->dispatch_ttl_ = 0;
   query->set_callback(actor_shared(this));
   connection_send_query(info, std::move(query));
@@ -1382,7 +1382,7 @@ bool Session::connection_send_bind_key(ConnectionInfo *info) {
 
   LOG(INFO) << "Bind key: " << tag("tmp", key_id) << tag("perm", static_cast<uint64>(perm_auth_key_id));
   NetQueryPtr query = G()->net_query_creator().create(
-      last_bind_query_id_,
+      last_bind_query_id_, nullptr,
       telegram_api::auth_bindTempAuthKey(perm_auth_key_id, nonce, expires_at, std::move(encrypted)), {}, DcId::main(),
       NetQuery::Type::Common, NetQuery::AuthFlag::On);
   query->dispatch_ttl_ = 0;
@@ -1513,7 +1513,7 @@ void Session::loop() {
   if (cached_connection_timestamp_ < now - 10) {
     cached_connection_.reset();
   }
-  if (!is_main_ && !has_queries() && !need_destroy_ && last_activity_timestamp_ < now - ACTIVITY_TIMEOUT) {
+  if (!is_main_ && !has_queries() && !need_destroy_auth_key_ && last_activity_timestamp_ < now - ACTIVITY_TIMEOUT) {
     on_session_failed(Status::OK());
   }
 

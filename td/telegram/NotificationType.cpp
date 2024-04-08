@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -18,6 +18,7 @@
 #include "td/telegram/VideosManager.h"
 #include "td/telegram/VoiceNotesManager.h"
 
+#include "td/utils/logging.h"
 #include "td/utils/misc.h"
 #include "td/utils/Slice.h"
 
@@ -254,6 +255,22 @@ class NotificationTypePushMessage final : public NotificationType {
           }
           return td_api::make_object<td_api::pushMessageContentGameScore>(title, score, is_pinned);
         }
+        if (key == "MESSAGE_GIFTCODE") {
+          auto month_count = to_integer<int32>(arg);
+          return td_api::make_object<td_api::pushMessageContentPremiumGiftCode>(month_count);
+        }
+        if (key == "MESSAGE_GIVEAWAY") {
+          int32 user_count = 0;
+          int32 month_count = 0;
+          if (!is_pinned) {
+            string user_count_str;
+            string month_count_str;
+            std::tie(user_count_str, month_count_str) = split(arg);
+            user_count = to_integer<int32>(user_count_str);
+            month_count = to_integer<int32>(month_count_str);
+          }
+          return td_api::make_object<td_api::pushMessageContentPremiumGiveaway>(user_count, month_count, is_pinned);
+        }
         break;
       case 'I':
         if (key == "MESSAGE_INVOICE") {
@@ -346,7 +363,8 @@ class NotificationTypePushMessage final : public NotificationType {
       default:
         break;
     }
-    UNREACHABLE();
+    LOG(FATAL) << "Have unsupported push notification key " << key;
+    return nullptr;
   }
 
   td_api::object_ptr<td_api::NotificationType> get_notification_type_object(Td *td, DialogId) const final {

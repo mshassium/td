@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -183,7 +183,13 @@ vector<std::pair<Slice, int32>> find_media_timestamps(Slice str);  // slice + me
 
 void remove_empty_entities(vector<MessageEntity> &entities);
 
-string get_first_url(const FormattedText &text);
+void remove_unallowed_quote_entities(FormattedText &text);
+
+int32 search_quote(FormattedText &&text, FormattedText &&quote, int32 quote_position);
+
+Slice get_first_url(const FormattedText &text);
+
+bool is_visible_url(const FormattedText &text, const string &url);
 
 Result<vector<MessageEntity>> parse_markdown(string &text);
 
@@ -223,19 +229,23 @@ FormattedText get_formatted_text(const ContactsManager *contacts_manager,
 
 // like clean_input_string but also validates entities
 Status fix_formatted_text(string &text, vector<MessageEntity> &entities, bool allow_empty, bool skip_new_entities,
-                          bool skip_bot_commands, bool skip_media_timestamps, bool skip_trim) TD_WARN_UNUSED_RESULT;
+                          bool skip_bot_commands, bool skip_media_timestamps, bool skip_trim,
+                          int32 *ltrim_count = nullptr) TD_WARN_UNUSED_RESULT;
 
 FormattedText get_message_text(const ContactsManager *contacts_manager, string message_text,
                                vector<tl_object_ptr<telegram_api::MessageEntity>> &&server_entities,
                                bool skip_new_entities, bool skip_media_timestamps, int32 send_date, bool from_album,
                                const char *source);
 
+void truncate_formatted_text(FormattedText &text, size_t length);
+
 td_api::object_ptr<td_api::formattedText> extract_input_caption(
     tl_object_ptr<td_api::InputMessageContent> &input_message_content);
 
 Result<FormattedText> get_formatted_text(const Td *td, DialogId dialog_id,
                                          td_api::object_ptr<td_api::formattedText> &&text, bool is_bot,
-                                         bool allow_empty, bool skip_media_timestamps, bool skip_trim);
+                                         bool allow_empty, bool skip_media_timestamps, bool skip_trim,
+                                         int32 *ltrim_count = nullptr);
 
 void add_formatted_text_dependencies(Dependencies &dependencies, const FormattedText *text);
 

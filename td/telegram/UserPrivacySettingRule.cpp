@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -10,7 +10,7 @@
 #include "td/telegram/ChatId.h"
 #include "td/telegram/ContactsManager.h"
 #include "td/telegram/Dependencies.h"
-#include "td/telegram/MessagesManager.h"
+#include "td/telegram/DialogManager.h"
 #include "td/telegram/Td.h"
 
 #include "td/utils/algorithm.h"
@@ -24,7 +24,7 @@ void UserPrivacySettingRule::set_dialog_ids(Td *td, const vector<int64> &chat_id
   dialog_ids_.clear();
   for (auto chat_id : chat_ids) {
     DialogId dialog_id(chat_id);
-    if (!td->messages_manager_->have_dialog_force(dialog_id, "UserPrivacySettingRule::set_dialog_ids")) {
+    if (!td->dialog_manager_->have_dialog_force(dialog_id, "UserPrivacySettingRule::set_dialog_ids")) {
       LOG(INFO) << "Ignore not found " << dialog_id;
       continue;
     }
@@ -52,6 +52,9 @@ UserPrivacySettingRule::UserPrivacySettingRule(Td *td, const td_api::UserPrivacy
   switch (rule.get_id()) {
     case td_api::userPrivacySettingRuleAllowContacts::ID:
       type_ = Type::AllowContacts;
+      break;
+    case td_api::userPrivacySettingRuleAllowPremiumUsers::ID:
+      type_ = Type::AllowPremium;
       break;
     case td_api::userPrivacySettingRuleAllowAll::ID:
       type_ = Type::AllowAll;
@@ -90,6 +93,9 @@ UserPrivacySettingRule::UserPrivacySettingRule(Td *td,
   switch (rule->get_id()) {
     case telegram_api::privacyValueAllowContacts::ID:
       type_ = Type::AllowContacts;
+      break;
+    case telegram_api::privacyValueAllowPremium::ID:
+      type_ = Type::AllowPremium;
       break;
     case telegram_api::privacyValueAllowCloseFriends::ID:
       type_ = Type::AllowCloseFriends;
@@ -146,7 +152,7 @@ void UserPrivacySettingRule::set_dialog_ids_from_server(Td *td, const vector<int
         continue;
       }
     }
-    td->messages_manager_->force_create_dialog(dialog_id, "set_dialog_ids_from_server");
+    td->dialog_manager_->force_create_dialog(dialog_id, "set_dialog_ids_from_server");
     dialog_ids_.push_back(dialog_id);
   }
 }
@@ -156,6 +162,8 @@ td_api::object_ptr<td_api::UserPrivacySettingRule> UserPrivacySettingRule::get_u
   switch (type_) {
     case Type::AllowContacts:
       return make_tl_object<td_api::userPrivacySettingRuleAllowContacts>();
+    case Type::AllowPremium:
+      return make_tl_object<td_api::userPrivacySettingRuleAllowPremiumUsers>();
     case Type::AllowCloseFriends:
       LOG(ERROR) << "Have AllowCloseFriends rule";
       return make_tl_object<td_api::userPrivacySettingRuleAllowUsers>();
@@ -166,7 +174,7 @@ td_api::object_ptr<td_api::UserPrivacySettingRule> UserPrivacySettingRule::get_u
           td->contacts_manager_->get_user_ids_object(user_ids_, "userPrivacySettingRuleAllowUsers"));
     case Type::AllowChatParticipants:
       return make_tl_object<td_api::userPrivacySettingRuleAllowChatMembers>(
-          td->messages_manager_->get_chat_ids_object(dialog_ids_, "UserPrivacySettingRule"));
+          td->dialog_manager_->get_chat_ids_object(dialog_ids_, "UserPrivacySettingRule"));
     case Type::RestrictContacts:
       return make_tl_object<td_api::userPrivacySettingRuleRestrictContacts>();
     case Type::RestrictAll:
@@ -176,7 +184,7 @@ td_api::object_ptr<td_api::UserPrivacySettingRule> UserPrivacySettingRule::get_u
           td->contacts_manager_->get_user_ids_object(user_ids_, "userPrivacySettingRuleRestrictUsers"));
     case Type::RestrictChatParticipants:
       return make_tl_object<td_api::userPrivacySettingRuleRestrictChatMembers>(
-          td->messages_manager_->get_chat_ids_object(dialog_ids_, "UserPrivacySettingRule"));
+          td->dialog_manager_->get_chat_ids_object(dialog_ids_, "UserPrivacySettingRule"));
     default:
       UNREACHABLE();
       return nullptr;
@@ -187,6 +195,8 @@ telegram_api::object_ptr<telegram_api::InputPrivacyRule> UserPrivacySettingRule:
   switch (type_) {
     case Type::AllowContacts:
       return make_tl_object<telegram_api::inputPrivacyValueAllowContacts>();
+    case Type::AllowPremium:
+      return make_tl_object<telegram_api::inputPrivacyValueAllowPremium>();
     case Type::AllowCloseFriends:
       return make_tl_object<telegram_api::inputPrivacyValueAllowCloseFriends>();
     case Type::AllowAll:

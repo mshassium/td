@@ -24,6 +24,9 @@ if (ZLIB_FOUND)
   endif()
 endif()
 
+if (NOT CRC32C_FOUND)
+  find_package(Crc32c QUIET)
+endif()
 if (CRC32C_FOUND)
   set(TD_HAVE_CRC32C 1)
 endif()
@@ -120,7 +123,6 @@ set(TDUTILS_SOURCE
   td/utils/tests.cpp
   td/utils/Time.cpp
   td/utils/Timer.cpp
-  td/utils/TsFileLog.cpp
   td/utils/tl_parsers.cpp
   td/utils/translit.cpp
   td/utils/TsCerr.cpp
@@ -401,12 +403,12 @@ if (ANDROID)
   target_link_libraries(tdutils PRIVATE log)
 endif()
 
-if (CMAKE_SYSTEM_NAME MATCHES "NetBSD")
-  target_link_directories(tdutils PUBLIC /usr/pkg/gcc12/x86_64--netbsd/lib /usr/pkg/gcc12/i486--netbsdelf/lib)
-  target_link_libraries(tdutils PUBLIC atomic)
+find_package(Atomics REQUIRED)
+if (ATOMICS_LIBRARIES)
+  target_link_libraries(tdutils PUBLIC "${ATOMICS_LIBRARIES}")
 endif()
 
-install(TARGETS tdutils EXPORT TdTargets
+install(TARGETS tdutils EXPORT TdStaticTargets
   LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
   ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
 )

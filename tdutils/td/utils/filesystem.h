@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -28,7 +28,7 @@ Status write_file(CSlice to, Slice data, WriteFileOptions options = {}) TD_WARN_
 
 string clean_filename(CSlice name);
 
-// writes data to file and ensures that the file is either fully overriden, or is left intact
+// writes data to file and ensures that the file is either fully overridden, or is left intact
 // uses path_tmp to temporary store data, then calls rename
 Status atomic_write_file(CSlice path, Slice data, CSlice path_tmp = {});
 

@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -141,6 +141,8 @@ class LinkManager final : public Actor {
   class InternalLinkMessageDraft;
   class InternalLinkPassportDataRequest;
   class InternalLinkPremiumFeatures;
+  class InternalLinkPremiumGift;
+  class InternalLinkPremiumGiftCode;
   class InternalLinkPrivacyAndSecuritySettings;
   class InternalLinkProxy;
   class InternalLinkPublicDialog;

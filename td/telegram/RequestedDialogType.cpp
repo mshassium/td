@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -12,14 +12,18 @@
 
 namespace td {
 
-RequestedDialogType::RequestedDialogType(td_api::object_ptr<td_api::keyboardButtonTypeRequestUser> &&request_user) {
-  CHECK(request_user != nullptr);
+RequestedDialogType::RequestedDialogType(td_api::object_ptr<td_api::keyboardButtonTypeRequestUsers> &&request_users) {
+  CHECK(request_users != nullptr);
   type_ = Type::User;
-  button_id_ = request_user->id_;
-  restrict_is_bot_ = request_user->restrict_user_is_bot_;
-  is_bot_ = request_user->user_is_bot_;
-  restrict_is_premium_ = request_user->restrict_user_is_premium_;
-  is_premium_ = request_user->user_is_premium_;
+  button_id_ = request_users->id_;
+  max_quantity_ = max(request_users->max_quantity_, 1);
+  restrict_is_bot_ = request_users->restrict_user_is_bot_;
+  is_bot_ = request_users->user_is_bot_;
+  restrict_is_premium_ = request_users->restrict_user_is_premium_;
+  is_premium_ = request_users->user_is_premium_;
+  request_name_ = request_users->request_name_;
+  request_username_ = request_users->request_username_;
+  request_photo_ = request_users->request_photo_;
 }
 
 RequestedDialogType::RequestedDialogType(td_api::object_ptr<td_api::keyboardButtonTypeRequestChat> &&request_dialog) {
@@ -37,12 +41,16 @@ RequestedDialogType::RequestedDialogType(td_api::object_ptr<td_api::keyboardButt
   auto channel_type = request_dialog->chat_is_channel_ ? ChannelType::Broadcast : ChannelType::Megagroup;
   user_administrator_rights_ = AdministratorRights(request_dialog->user_administrator_rights_, channel_type);
   bot_administrator_rights_ = AdministratorRights(request_dialog->bot_administrator_rights_, channel_type);
+  request_name_ = request_dialog->request_title_;
+  request_username_ = request_dialog->request_username_;
+  request_photo_ = request_dialog->request_photo_;
 }
 
 RequestedDialogType::RequestedDialogType(telegram_api::object_ptr<telegram_api::RequestPeerType> &&peer_type,
-                                         int32 button_id) {
+                                         int32 button_id, int32 max_quantity) {
   CHECK(peer_type != nullptr);
   button_id_ = button_id;
+  max_quantity_ = max(max_quantity, 1);
   switch (peer_type->get_id()) {
     case telegram_api::requestPeerTypeUser::ID: {
       auto type = telegram_api::move_object_as<telegram_api::requestPeerTypeUser>(peer_type);
@@ -87,8 +95,9 @@ RequestedDialogType::RequestedDialogType(telegram_api::object_ptr<telegram_api::
 
 td_api::object_ptr<td_api::KeyboardButtonType> RequestedDialogType::get_keyboard_button_type_object() const {
   if (type_ == Type::User) {
-    return td_api::make_object<td_api::keyboardButtonTypeRequestUser>(button_id_, restrict_is_bot_, is_bot_,
-                                                                      restrict_is_premium_, is_premium_);
+    return td_api::make_object<td_api::keyboardButtonTypeRequestUsers>(
+        button_id_, restrict_is_bot_, is_bot_, restrict_is_premium_, is_premium_, max_quantity_, request_name_,
+        request_username_, request_photo_);
   } else {
     auto user_administrator_rights = restrict_user_administrator_rights_
                                          ? user_administrator_rights_.get_chat_administrator_rights_object()
@@ -97,7 +106,8 @@ td_api::object_ptr<td_api::KeyboardButtonType> RequestedDialogType::get_keyboard
         restrict_bot_administrator_rights_ ? bot_administrator_rights_.get_chat_administrator_rights_object() : nullptr;
     return td_api::make_object<td_api::keyboardButtonTypeRequestChat>(
         button_id_, type_ == Type::Channel, restrict_is_forum_, is_forum_, restrict_has_username_, has_username_,
-        is_created_, std::move(user_administrator_rights), std::move(bot_administrator_rights), bot_is_participant_);
+        is_created_, std::move(user_administrator_rights), std::move(bot_administrator_rights), bot_is_participant_,
+        request_name_, request_username_, request_photo_);
   }
 }
 
@@ -167,6 +177,23 @@ telegram_api::object_ptr<telegram_api::RequestPeerType> RequestedDialogType::get
       UNREACHABLE();
       return nullptr;
   }
+}
+
+telegram_api::object_ptr<telegram_api::inputKeyboardButtonRequestPeer>
+RequestedDialogType::get_input_keyboard_button_request_peer(const string &text) const {
+  int32 flags = 0;
+  if (request_name_) {
+    flags |= telegram_api::inputKeyboardButtonRequestPeer::NAME_REQUESTED_MASK;
+  }
+  if (request_username_) {
+    flags |= telegram_api::inputKeyboardButtonRequestPeer::USERNAME_REQUESTED_MASK;
+  }
+  if (request_photo_) {
+    flags |= telegram_api::inputKeyboardButtonRequestPeer::PHOTO_REQUESTED_MASK;
+  }
+  return telegram_api::make_object<telegram_api::inputKeyboardButtonRequestPeer>(
+      flags, false /*ignored*/, false /*ignored*/, false /*ignored*/, text, button_id_,
+      get_input_request_peer_type_object(), max_quantity_);
 }
 
 int32 RequestedDialogType::get_button_id() const {
@@ -263,6 +290,16 @@ Status RequestedDialogType::check_shared_dialog(Td *td, DialogId dialog_id) cons
       return Status::Error(400, "Can't share secret chats");
     case DialogType::None:
       UNREACHABLE();
+  }
+  return Status::OK();
+}
+
+Status RequestedDialogType::check_shared_dialog_count(size_t count) const {
+  if (count == 0) {
+    return Status::Error(400, "Too few chats are chosen");
+  }
+  if (count > static_cast<size_t>(max_quantity_)) {
+    return Status::Error(400, "Too many chats are chosen");
   }
   return Status::OK();
 }

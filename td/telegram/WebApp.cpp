@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -59,6 +59,12 @@ td_api::object_ptr<td_api::webApp> WebApp::get_web_app_object(Td *td) const {
   return td_api::make_object<td_api::webApp>(short_name_, title_, description_,
                                              get_photo_object(td->file_manager_.get(), photo_),
                                              td->animations_manager_->get_animation_object(animation_file_id_));
+}
+
+td_api::object_ptr<td_api::messageSponsorTypeWebApp> WebApp::get_message_sponsor_type_web_app(
+    const string &bot_username, const string &start_parameter) const {
+  return td_api::make_object<td_api::messageSponsorTypeWebApp>(
+      title_, td_api::make_object<td_api::internalLinkTypeWebApp>(bot_username, short_name_, start_parameter));
 }
 
 bool operator==(const WebApp &lhs, const WebApp &rhs) {

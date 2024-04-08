@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -36,11 +36,18 @@ class AttachMenuManager;
 class AuthManager;
 class AutosaveManager;
 class BackgroundManager;
+class BoostManager;
+class BusinessConnectionManager;
+class BusinessManager;
 class CallManager;
 class ConfigManager;
 class ConnectionCreator;
 class ContactsManager;
+class DialogActionManager;
 class DialogFilterManager;
+class DialogInviteLinkManager;
+class DialogManager;
+class DialogParticipantManager;
 class DownloadManager;
 class FileManager;
 class FileReferenceManager;
@@ -49,13 +56,17 @@ class GameManager;
 class GroupCallManager;
 class LanguagePackManager;
 class LinkManager;
+class MessageImportManager;
 class MessagesManager;
 class NetQueryDispatcher;
 class NotificationManager;
 class NotificationSettingsManager;
 class OptionManager;
 class PasswordManager;
+class PeopleNearbyManager;
+class QuickReplyManager;
 class ReactionManager;
+class SavedMessagesManager;
 class SecretChatsManager;
 class SponsoredMessageManager;
 class StateManager;
@@ -66,7 +77,9 @@ class Td;
 class TdDb;
 class TempAuthKeyWatchdog;
 class ThemeManager;
+class TimeZoneManager;
 class TopDialogManager;
+class TranscriptionManager;
 class UpdatesManager;
 class WebPagesManager;
 
@@ -214,6 +227,27 @@ class Global final : public ActorContext {
     background_manager_ = background_manager;
   }
 
+  ActorId<BoostManager> boost_manager() const {
+    return boost_manager_;
+  }
+  void set_boost_manager(ActorId<BoostManager> boost_manager) {
+    boost_manager_ = boost_manager;
+  }
+
+  ActorId<BusinessConnectionManager> business_connection_manager() const {
+    return business_connection_manager_;
+  }
+  void set_business_connection_manager(ActorId<BusinessConnectionManager> business_connection_manager) {
+    business_connection_manager_ = business_connection_manager;
+  }
+
+  ActorId<BusinessManager> business_manager() const {
+    return business_manager_;
+  }
+  void set_business_manager(ActorId<BusinessManager> business_manager) {
+    business_manager_ = business_manager;
+  }
+
   ActorId<CallManager> call_manager() const {
     return call_manager_;
   }
@@ -235,11 +269,39 @@ class Global final : public ActorContext {
     contacts_manager_ = contacts_manager;
   }
 
+  ActorId<DialogActionManager> dialog_action_manager() const {
+    return dialog_action_manager_;
+  }
+  void set_dialog_action_manager(ActorId<DialogActionManager> dialog_action_manager) {
+    dialog_action_manager_ = std::move(dialog_action_manager);
+  }
+
   ActorId<DialogFilterManager> dialog_filter_manager() const {
     return dialog_filter_manager_;
   }
   void set_dialog_filter_manager(ActorId<DialogFilterManager> dialog_filter_manager) {
     dialog_filter_manager_ = std::move(dialog_filter_manager);
+  }
+
+  ActorId<DialogInviteLinkManager> dialog_invite_link_manager() const {
+    return dialog_invite_link_manager_;
+  }
+  void set_dialog_invite_link_manager(ActorId<DialogInviteLinkManager> dialog_invite_link_manager) {
+    dialog_invite_link_manager_ = std::move(dialog_invite_link_manager);
+  }
+
+  ActorId<DialogManager> dialog_manager() const {
+    return dialog_manager_;
+  }
+  void set_dialog_manager(ActorId<DialogManager> dialog_manager) {
+    dialog_manager_ = std::move(dialog_manager);
+  }
+
+  ActorId<DialogParticipantManager> dialog_participant_manager() const {
+    return dialog_participant_manager_;
+  }
+  void set_dialog_participant_manager(ActorId<DialogParticipantManager> dialog_participant_manager) {
+    dialog_participant_manager_ = std::move(dialog_participant_manager);
   }
 
   ActorId<DownloadManager> download_manager() const {
@@ -298,6 +360,13 @@ class Global final : public ActorContext {
     link_manager_ = link_manager;
   }
 
+  ActorId<MessageImportManager> message_import_manager() const {
+    return message_import_manager_;
+  }
+  void set_message_import_manager(ActorId<MessageImportManager> message_import_manager) {
+    message_import_manager_ = message_import_manager;
+  }
+
   ActorId<MessagesManager> messages_manager() const {
     return messages_manager_;
   }
@@ -322,6 +391,7 @@ class Global final : public ActorContext {
   void set_option_manager(OptionManager *option_manager) {
     option_manager_ = option_manager;
   }
+  OptionManager *get_option_manager();
 
   ActorId<PasswordManager> password_manager() const {
     return password_manager_;
@@ -330,11 +400,32 @@ class Global final : public ActorContext {
     password_manager_ = password_manager;
   }
 
+  ActorId<PeopleNearbyManager> people_nearby_manager() const {
+    return people_nearby_manager_;
+  }
+  void set_people_nearby_manager(ActorId<PeopleNearbyManager> people_nearby_manager) {
+    people_nearby_manager_ = people_nearby_manager;
+  }
+
+  ActorId<QuickReplyManager> quick_reply_manager() const {
+    return quick_reply_manager_;
+  }
+  void set_quick_reply_manager(ActorId<QuickReplyManager> quick_reply_manager) {
+    quick_reply_manager_ = quick_reply_manager;
+  }
+
   ActorId<ReactionManager> reaction_manager() const {
     return reaction_manager_;
   }
   void set_reaction_manager(ActorId<ReactionManager> reaction_manager) {
     reaction_manager_ = reaction_manager;
+  }
+
+  ActorId<SavedMessagesManager> saved_messages_manager() const {
+    return saved_messages_manager_;
+  }
+  void set_saved_messages_manager(ActorId<SavedMessagesManager> saved_messages_manager) {
+    saved_messages_manager_ = saved_messages_manager;
   }
 
   ActorId<SecretChatsManager> secret_chats_manager() const {
@@ -379,11 +470,25 @@ class Global final : public ActorContext {
     theme_manager_ = theme_manager;
   }
 
+  ActorId<TimeZoneManager> time_zone_manager() const {
+    return time_zone_manager_;
+  }
+  void set_time_zone_manager(ActorId<TimeZoneManager> time_zone_manager) {
+    time_zone_manager_ = time_zone_manager;
+  }
+
   ActorId<TopDialogManager> top_dialog_manager() const {
     return top_dialog_manager_;
   }
   void set_top_dialog_manager(ActorId<TopDialogManager> top_dialog_manager) {
     top_dialog_manager_ = top_dialog_manager;
+  }
+
+  ActorId<TranscriptionManager> transcription_manager() const {
+    return transcription_manager_;
+  }
+  void set_transcription_manager(ActorId<TranscriptionManager> transcription_manager) {
+    transcription_manager_ = transcription_manager;
   }
 
   ActorId<UpdatesManager> updates_manager() const {
@@ -494,6 +599,10 @@ class Global final : public ActorContext {
 
   static int32 get_retry_after(int32 error_code, Slice error_message);
 
+  static int32 get_retry_after(const Status &error) {
+    return get_retry_after(error.code(), error.message());
+  }
+
   const std::vector<std::shared_ptr<NetStatsCallback>> &get_net_stats_file_callbacks() {
     return net_stats_file_callbacks_;
   }
@@ -521,10 +630,17 @@ class Global final : public ActorContext {
   ActorId<AuthManager> auth_manager_;
   ActorId<AutosaveManager> autosave_manager_;
   ActorId<BackgroundManager> background_manager_;
+  ActorId<BoostManager> boost_manager_;
+  ActorId<BusinessConnectionManager> business_connection_manager_;
+  ActorId<BusinessManager> business_manager_;
   ActorId<CallManager> call_manager_;
   ActorId<ConfigManager> config_manager_;
   ActorId<ContactsManager> contacts_manager_;
+  ActorId<DialogActionManager> dialog_action_manager_;
   ActorId<DialogFilterManager> dialog_filter_manager_;
+  ActorId<DialogInviteLinkManager> dialog_invite_link_manager_;
+  ActorId<DialogManager> dialog_manager_;
+  ActorId<DialogParticipantManager> dialog_participant_manager_;
   ActorId<DownloadManager> download_manager_;
   ActorId<FileManager> file_manager_;
   ActorId<FileReferenceManager> file_reference_manager_;
@@ -533,18 +649,24 @@ class Global final : public ActorContext {
   ActorId<GroupCallManager> group_call_manager_;
   ActorId<LanguagePackManager> language_pack_manager_;
   ActorId<LinkManager> link_manager_;
+  ActorId<MessageImportManager> message_import_manager_;
   ActorId<MessagesManager> messages_manager_;
   ActorId<NotificationManager> notification_manager_;
   ActorId<NotificationSettingsManager> notification_settings_manager_;
   ActorId<PasswordManager> password_manager_;
+  ActorId<PeopleNearbyManager> people_nearby_manager_;
+  ActorId<QuickReplyManager> quick_reply_manager_;
   ActorId<ReactionManager> reaction_manager_;
+  ActorId<SavedMessagesManager> saved_messages_manager_;
   ActorId<SecretChatsManager> secret_chats_manager_;
   ActorId<SponsoredMessageManager> sponsored_message_manager_;
   ActorId<StickersManager> stickers_manager_;
   ActorId<StorageManager> storage_manager_;
   ActorId<StoryManager> story_manager_;
   ActorId<ThemeManager> theme_manager_;
+  ActorId<TimeZoneManager> time_zone_manager_;
   ActorId<TopDialogManager> top_dialog_manager_;
+  ActorId<TranscriptionManager> transcription_manager_;
   ActorId<UpdatesManager> updates_manager_;
   ActorId<WebPagesManager> web_pages_manager_;
   ActorOwn<ConnectionCreator> connection_creator_;
@@ -587,8 +709,6 @@ class Global final : public ActorContext {
   int32 to_unix_time(double server_time) const;
 
   const OptionManager *get_option_manager() const;
-
-  OptionManager *get_option_manager();
 
   void do_save_server_time_difference();
 

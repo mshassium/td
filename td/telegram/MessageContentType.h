@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -71,7 +71,16 @@ enum class MessageContentType : int32 {
   WebViewWriteAccessAllowed,
   SetBackground,
   Story,
-  WriteAccessAllowedByRequest
+  WriteAccessAllowedByRequest,
+  GiftCode,
+  Giveaway,
+  GiveawayLaunch,
+  GiveawayResults,
+  GiveawayWinners,
+  ExpiredVideoNote,
+  ExpiredVoiceNote,
+  BoostApply,
+  DialogShared
 };
 // increase MessageUnsupported::CURRENT_VERSION each time a new message content type is added
 
@@ -81,9 +90,15 @@ bool is_allowed_media_group_content(MessageContentType content_type);
 
 bool is_homogenous_media_group_content(MessageContentType content_type);
 
-bool is_secret_message_content(int32 ttl, MessageContentType content_type);
+bool can_be_secret_message_content(MessageContentType content_type);
 
 bool is_service_message_content(MessageContentType content_type);
+
+bool is_editable_message_content(MessageContentType content_type);
+
+bool is_supported_reply_message_content(MessageContentType content_type);
+
+bool is_expired_message_content(MessageContentType content_type);
 
 bool can_have_message_content_caption(MessageContentType content_type);
 

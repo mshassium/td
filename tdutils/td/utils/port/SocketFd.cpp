@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -578,7 +578,7 @@ Status get_socket_pending_error(const NativeFd &fd, WSAOVERLAPPED *overlapped, S
   DWORD flags = 0;
   BOOL success = WSAGetOverlappedResult(fd.socket(), overlapped, &num_bytes, false, &flags);
   if (success) {
-    LOG(ERROR) << "WSAGetOverlappedResult succeded after " << iocp_error;
+    LOG(ERROR) << "WSAGetOverlappedResult succeeded after " << iocp_error;
     return iocp_error;
   }
   return OS_SOCKET_ERROR(PSLICE() << "Error on " << fd);

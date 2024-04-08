@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -319,19 +319,14 @@ void AuthManager::start_up() {
     G()->net_query_dispatcher().destroy_auth_keys(PromiseCreator::lambda([](Result<Unit> result) {
       if (result.is_ok()) {
         send_closure_later(G()->td(), &Td::destroy);
+      } else {
+        LOG(INFO) << "Failed to destroy auth keys";
       }
     }));
   }
 }
 void AuthManager::tear_down() {
   parent_.reset();
-}
-
-bool AuthManager::is_bot() const {
-  if (net_query_id_ != 0 && net_query_type_ == NetQueryType::BotAuthentication) {
-    return true;
-  }
-  return is_bot_ && was_authorized();
 }
 
 bool AuthManager::was_authorized() const {
@@ -641,7 +636,7 @@ void AuthManager::check_code(uint64 query_id, string code) {
   send_auth_sign_in_query();
 }
 
-void AuthManager::register_user(uint64 query_id, string first_name, string last_name) {
+void AuthManager::register_user(uint64 query_id, string first_name, string last_name, bool disable_notification) {
   if (state_ != State::WaitRegistration) {
     return on_query_error(query_id, Status::Error(400, "Call to registerUser unexpected"));
   }
@@ -653,8 +648,12 @@ void AuthManager::register_user(uint64 query_id, string first_name, string last_
   }
 
   last_name = clean_name(last_name, MAX_NAME_LENGTH);
+  int32 flags = 0;
+  if (disable_notification) {
+    flags |= telegram_api::auth_signUp::NO_JOINED_NOTIFICATIONS_MASK;
+  }
   start_net_query(NetQueryType::SignUp, G()->net_query_creator().create_unauth(telegram_api::auth_signUp(
-                                            send_code_helper_.phone_number().str(),
+                                            flags, false /*ignored*/, send_code_helper_.phone_number().str(),
                                             send_code_helper_.phone_code_hash().str(), first_name, last_name)));
 }
 
@@ -1135,7 +1134,6 @@ void AuthManager::on_log_out_result(NetQueryPtr &&net_query) {
   } else if (r_log_out.error().code() != 401) {
     LOG(ERROR) << "Receive error for auth.logOut: " << r_log_out.error();
   }
-  // state_ will stay LoggingOut, so no queries will work.
   destroy_auth_keys();
   on_current_query_ok();
 }
@@ -1167,20 +1165,18 @@ void AuthManager::on_authorization_lost(string source) {
 
 void AuthManager::destroy_auth_keys() {
   if (state_ == State::Closing || state_ == State::DestroyingKeys) {
+    LOG(INFO) << "Already destroying auth keys";
     return;
   }
   update_state(State::DestroyingKeys);
-  auto promise = PromiseCreator::lambda([](Result<Unit> result) {
-    if (result.is_ok()) {
-      G()->net_query_dispatcher().destroy_auth_keys(PromiseCreator::lambda([](Result<Unit> result) {
-        if (result.is_ok()) {
-          send_closure_later(G()->td(), &Td::destroy);
-        }
-      }));
-    }
-  });
   G()->td_db()->get_binlog_pmc()->set("auth", "destroy");
-  G()->td_db()->get_binlog_pmc()->force_sync(std::move(promise));
+  G()->net_query_dispatcher().destroy_auth_keys(PromiseCreator::lambda([](Result<Unit> result) {
+    if (result.is_ok()) {
+      send_closure_later(G()->td(), &Td::destroy);
+    } else {
+      LOG(INFO) << "Failed to destroy auth keys";
+    }
+  }));
 }
 
 void AuthManager::on_delete_account_result(NetQueryPtr &&net_query) {
@@ -1265,8 +1261,8 @@ void AuthManager::on_get_authorization(tl_object_ptr<telegram_api::auth_Authoriz
   td_->theme_manager_->init();
   td_->top_dialog_manager_->init();
   td_->updates_manager_->get_difference("on_get_authorization");
-  td_->on_online_updated(false, true);
   if (!is_bot()) {
+    td_->on_online_updated(false, true);
     td_->schedule_get_terms_of_service(0);
     td_->reload_promo_data();
     G()->td_db()->get_binlog_pmc()->set("fetched_marks_as_unread", "1");

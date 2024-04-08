@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -52,7 +52,6 @@ class TopDialogManager final : public Actor {
   Td *td_;
   ActorShared<> parent_;
 
-  bool is_active_ = false;
   bool is_enabled_ = true;
   bool is_synchronized_ = false;
   int32 rating_e_decay_ = 241920;

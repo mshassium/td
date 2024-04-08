@@ -1,24 +1,23 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
 #include "td/telegram/VoiceNotesManager.h"
 
-#include "td/telegram/AuthManager.h"
 #include "td/telegram/Dimensions.h"
 #include "td/telegram/files/FileManager.h"
 #include "td/telegram/Global.h"
-#include "td/telegram/MessagesManager.h"
 #include "td/telegram/secret_api.h"
 #include "td/telegram/Td.h"
 #include "td/telegram/td_api.h"
 #include "td/telegram/telegram_api.h"
-#include "td/telegram/UpdatesManager.h"
+#include "td/telegram/TranscriptionManager.h"
 
 #include "td/utils/buffer.h"
 #include "td/utils/logging.h"
+#include "td/utils/Status.h"
 
 namespace td {
 
@@ -26,8 +25,7 @@ VoiceNotesManager::VoiceNotesManager(Td *td, ActorShared<> parent) : td_(td), pa
 }
 
 VoiceNotesManager::~VoiceNotesManager() {
-  Scheduler::instance()->destroy_on_scheduler(G()->get_gc_scheduler_id(), voice_notes_, voice_note_messages_,
-                                              message_voice_notes_);
+  Scheduler::instance()->destroy_on_scheduler(G()->get_gc_scheduler_id(), voice_notes_);
 }
 
 void VoiceNotesManager::tear_down() {
@@ -40,6 +38,15 @@ int32 VoiceNotesManager::get_voice_note_duration(FileId file_id) const {
     return 0;
   }
   return voice_note->duration;
+}
+
+TranscriptionInfo *VoiceNotesManager::get_voice_note_transcription_info(FileId file_id, bool allow_creation) {
+  auto voice_note = get_voice_note(file_id);
+  CHECK(voice_note != nullptr);
+  if (voice_note->transcription_info == nullptr && allow_creation) {
+    voice_note->transcription_info = make_unique<TranscriptionInfo>();
+  }
+  return voice_note->transcription_info.get();
 }
 
 tl_object_ptr<td_api::voiceNote> VoiceNotesManager::get_voice_note_object(FileId file_id) const {
@@ -76,7 +83,7 @@ FileId VoiceNotesManager::on_get_voice_note(unique_ptr<VoiceNote> new_voice_note
       v->waveform = std::move(new_voice_note->waveform);
     }
     if (TranscriptionInfo::update_from(v->transcription_info, std::move(new_voice_note->transcription_info))) {
-      on_voice_note_transcription_completed(file_id);
+      td_->transcription_manager_->on_transcription_completed(file_id);
     }
   }
 
@@ -134,129 +141,6 @@ void VoiceNotesManager::create_voice_note(FileId file_id, string mime_type, int3
   on_get_voice_note(std::move(v), replace);
 }
 
-void VoiceNotesManager::register_voice_note(FileId voice_note_file_id, MessageFullId message_full_id,
-                                            const char *source) {
-  if (message_full_id.get_message_id().is_scheduled() || !message_full_id.get_message_id().is_server() ||
-      td_->auth_manager_->is_bot()) {
-    return;
-  }
-  LOG(INFO) << "Register voice note " << voice_note_file_id << " from " << message_full_id << " from " << source;
-  CHECK(voice_note_file_id.is_valid());
-  bool is_inserted = voice_note_messages_[voice_note_file_id].insert(message_full_id).second;
-  LOG_CHECK(is_inserted) << source << ' ' << voice_note_file_id << ' ' << message_full_id;
-  is_inserted = message_voice_notes_.emplace(message_full_id, voice_note_file_id).second;
-  CHECK(is_inserted);
-}
-
-void VoiceNotesManager::unregister_voice_note(FileId voice_note_file_id, MessageFullId message_full_id,
-                                              const char *source) {
-  if (message_full_id.get_message_id().is_scheduled() || !message_full_id.get_message_id().is_server() ||
-      td_->auth_manager_->is_bot()) {
-    return;
-  }
-  LOG(INFO) << "Unregister voice note " << voice_note_file_id << " from " << message_full_id << " from " << source;
-  CHECK(voice_note_file_id.is_valid());
-  auto &message_ids = voice_note_messages_[voice_note_file_id];
-  auto is_deleted = message_ids.erase(message_full_id) > 0;
-  LOG_CHECK(is_deleted) << source << ' ' << voice_note_file_id << ' ' << message_full_id;
-  if (message_ids.empty()) {
-    voice_note_messages_.erase(voice_note_file_id);
-  }
-  is_deleted = message_voice_notes_.erase(message_full_id) > 0;
-  CHECK(is_deleted);
-}
-
-void VoiceNotesManager::recognize_speech(MessageFullId message_full_id, Promise<Unit> &&promise) {
-  auto it = message_voice_notes_.find(message_full_id);
-  CHECK(it != message_voice_notes_.end());
-
-  auto file_id = it->second;
-  auto voice_note = get_voice_note(file_id);
-  CHECK(voice_note != nullptr);
-  if (voice_note->transcription_info == nullptr) {
-    voice_note->transcription_info = make_unique<TranscriptionInfo>();
-  }
-
-  auto handler = [actor_id = actor_id(this),
-                  file_id](Result<telegram_api::object_ptr<telegram_api::updateTranscribedAudio>> r_update) {
-    send_closure(actor_id, &VoiceNotesManager::on_transcribed_audio_update, file_id, true, std::move(r_update));
-  };
-  if (voice_note->transcription_info->recognize_speech(td_, message_full_id, std::move(promise), std::move(handler))) {
-    on_voice_note_transcription_updated(file_id);
-  }
-}
-
-void VoiceNotesManager::on_transcribed_audio_update(
-    FileId file_id, bool is_initial, Result<telegram_api::object_ptr<telegram_api::updateTranscribedAudio>> r_update) {
-  if (G()->close_flag()) {
-    return;
-  }
-
-  auto voice_note = get_voice_note(file_id);
-  CHECK(voice_note != nullptr);
-  CHECK(voice_note->transcription_info != nullptr);
-
-  if (r_update.is_error()) {
-    auto promises = voice_note->transcription_info->on_failed_transcription(r_update.error().clone());
-    on_voice_note_transcription_updated(file_id);
-    fail_promises(promises, r_update.move_as_error());
-    return;
-  }
-  auto update = r_update.move_as_ok();
-  auto transcription_id = update->transcription_id_;
-  if (!update->pending_) {
-    auto promises = voice_note->transcription_info->on_final_transcription(std::move(update->text_), transcription_id);
-    on_voice_note_transcription_completed(file_id);
-    set_promises(promises);
-  } else {
-    auto is_changed =
-        voice_note->transcription_info->on_partial_transcription(std::move(update->text_), transcription_id);
-    if (is_changed) {
-      on_voice_note_transcription_updated(file_id);
-    }
-
-    if (is_initial) {
-      td_->updates_manager_->subscribe_to_transcribed_audio_updates(
-          transcription_id, [actor_id = actor_id(this),
-                             file_id](Result<telegram_api::object_ptr<telegram_api::updateTranscribedAudio>> r_update) {
-            send_closure(actor_id, &VoiceNotesManager::on_transcribed_audio_update, file_id, false,
-                         std::move(r_update));
-          });
-    }
-  }
-}
-
-void VoiceNotesManager::on_voice_note_transcription_updated(FileId file_id) {
-  auto it = voice_note_messages_.find(file_id);
-  if (it != voice_note_messages_.end()) {
-    for (const auto &message_full_id : it->second) {
-      td_->messages_manager_->on_external_update_message_content(message_full_id);
-    }
-  }
-}
-
-void VoiceNotesManager::on_voice_note_transcription_completed(FileId file_id) {
-  auto it = voice_note_messages_.find(file_id);
-  if (it != voice_note_messages_.end()) {
-    for (const auto &message_full_id : it->second) {
-      td_->messages_manager_->on_update_message_content(message_full_id);
-    }
-  }
-}
-
-void VoiceNotesManager::rate_speech_recognition(MessageFullId message_full_id, bool is_good, Promise<Unit> &&promise) {
-  auto it = message_voice_notes_.find(message_full_id);
-  CHECK(it != message_voice_notes_.end());
-
-  auto file_id = it->second;
-  auto voice_note = get_voice_note(file_id);
-  CHECK(voice_note != nullptr);
-  if (voice_note->transcription_info == nullptr) {
-    return promise.set_value(Unit());
-  }
-  voice_note->transcription_info->rate_speech_recognition(td_, message_full_id, is_good, std::move(promise));
-}
-
 SecretInputMedia VoiceNotesManager::get_secret_input_media(FileId voice_note_file_id,
                                                            tl_object_ptr<telegram_api::InputEncryptedFile> input_file,
                                                            const string &caption, int32 layer) const {
@@ -283,17 +167,25 @@ SecretInputMedia VoiceNotesManager::get_secret_input_media(FileId voice_note_fil
 }
 
 tl_object_ptr<telegram_api::InputMedia> VoiceNotesManager::get_input_media(
-    FileId file_id, tl_object_ptr<telegram_api::InputFile> input_file) const {
+    FileId file_id, tl_object_ptr<telegram_api::InputFile> input_file, int32 ttl) const {
   auto file_view = td_->file_manager_->get_file_view(file_id);
   if (file_view.is_encrypted()) {
     return nullptr;
   }
   if (file_view.has_remote_location() && !file_view.main_remote_location().is_web() && input_file == nullptr) {
+    int32 flags = 0;
+    if (ttl != 0) {
+      flags |= telegram_api::inputMediaDocument::TTL_SECONDS_MASK;
+    }
     return make_tl_object<telegram_api::inputMediaDocument>(
-        0, false /*ignored*/, file_view.main_remote_location().as_input_document(), 0, string());
+        flags, false /*ignored*/, file_view.main_remote_location().as_input_document(), ttl, string());
   }
   if (file_view.has_url()) {
-    return make_tl_object<telegram_api::inputMediaDocumentExternal>(0, false /*ignored*/, file_view.url(), 0);
+    int32 flags = 0;
+    if (ttl != 0) {
+      flags |= telegram_api::inputMediaDocumentExternal::TTL_SECONDS_MASK;
+    }
+    return make_tl_object<telegram_api::inputMediaDocumentExternal>(flags, false /*ignored*/, file_view.url(), ttl);
   }
 
   if (input_file != nullptr) {
@@ -301,19 +193,25 @@ tl_object_ptr<telegram_api::InputMedia> VoiceNotesManager::get_input_media(
     CHECK(voice_note != nullptr);
 
     vector<tl_object_ptr<telegram_api::DocumentAttribute>> attributes;
-    int32 flags = telegram_api::documentAttributeAudio::VOICE_MASK;
-    if (!voice_note->waveform.empty()) {
-      flags |= telegram_api::documentAttributeAudio::WAVEFORM_MASK;
+    {
+      int32 flags = telegram_api::documentAttributeAudio::VOICE_MASK;
+      if (!voice_note->waveform.empty()) {
+        flags |= telegram_api::documentAttributeAudio::WAVEFORM_MASK;
+      }
+      attributes.push_back(make_tl_object<telegram_api::documentAttributeAudio>(
+          flags, false /*ignored*/, voice_note->duration, "", "", BufferSlice(voice_note->waveform)));
     }
-    attributes.push_back(make_tl_object<telegram_api::documentAttributeAudio>(
-        flags, false /*ignored*/, voice_note->duration, "", "", BufferSlice(voice_note->waveform)));
     string mime_type = voice_note->mime_type;
     if (mime_type != "audio/ogg" && mime_type != "audio/mpeg" && mime_type != "audio/mp4") {
       mime_type = "audio/ogg";
     }
+    int32 flags = 0;
+    if (ttl != 0) {
+      flags |= telegram_api::inputMediaUploadedDocument::TTL_SECONDS_MASK;
+    }
     return make_tl_object<telegram_api::inputMediaUploadedDocument>(
-        0, false /*ignored*/, false /*ignored*/, false /*ignored*/, std::move(input_file), nullptr, mime_type,
-        std::move(attributes), vector<tl_object_ptr<telegram_api::InputDocument>>(), 0);
+        flags, false /*ignored*/, false /*ignored*/, false /*ignored*/, std::move(input_file), nullptr, mime_type,
+        std::move(attributes), vector<tl_object_ptr<telegram_api::InputDocument>>(), ttl);
   } else {
     CHECK(!file_view.has_remote_location());
   }

@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -8,6 +8,7 @@
 
 #include "td/telegram/misc.h"
 
+#include "td/utils/algorithm.h"
 #include "td/utils/as.h"
 #include "td/utils/base64.h"
 #include "td/utils/crypto.h"
@@ -84,6 +85,28 @@ ReactionType::ReactionType(const td_api::object_ptr<td_api::ReactionType> &type)
   }
 }
 
+vector<ReactionType> ReactionType::get_reaction_types(
+    const vector<telegram_api::object_ptr<telegram_api::Reaction>> &reactions) {
+  return transform(reactions, [](const auto &reaction) { return ReactionType(reaction); });
+}
+
+vector<ReactionType> ReactionType::get_reaction_types(
+    const vector<td_api::object_ptr<td_api::ReactionType>> &reactions) {
+  return transform(reactions, [](const auto &reaction) { return ReactionType(reaction); });
+}
+
+vector<telegram_api::object_ptr<telegram_api::Reaction>> ReactionType::get_input_reactions(
+    const vector<ReactionType> &reaction_types) {
+  return transform(reaction_types,
+                   [](const ReactionType &reaction_type) { return reaction_type.get_input_reaction(); });
+}
+
+vector<td_api::object_ptr<td_api::ReactionType>> ReactionType::get_reaction_types_object(
+    const vector<ReactionType> &reaction_types) {
+  return transform(reaction_types,
+                   [](const ReactionType &reaction_type) { return reaction_type.get_reaction_type_object(); });
+}
+
 telegram_api::object_ptr<telegram_api::Reaction> ReactionType::get_input_reaction() const {
   if (is_empty()) {
     return telegram_api::make_object<telegram_api::reactionEmpty>();
@@ -109,6 +132,14 @@ td_api::object_ptr<td_api::updateDefaultReactionType> ReactionType::get_update_d
     return nullptr;
   }
   return td_api::make_object<td_api::updateDefaultReactionType>(get_reaction_type_object());
+}
+
+uint64 ReactionType::get_hash() const {
+  if (is_custom_reaction()) {
+    return static_cast<uint64>(get_custom_emoji_id(reaction_));
+  } else {
+    return get_md5_string_hash(remove_emoji_selectors(reaction_));
+  }
 }
 
 bool ReactionType::is_custom_reaction() const {

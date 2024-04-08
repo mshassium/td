@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -83,11 +83,11 @@ string oneline(Slice str) {
 
 namespace detail {
 Status get_to_integer_safe_error(Slice str) {
-  auto status = Status::Error(PSLICE() << "Can't parse \"" << str << "\" as an integer");
-  if (!check_utf8(status.message())) {
-    status = Status::Error("Strings must be encoded in UTF-8");
+  auto error_message = PSTRING() << "Can't parse as an integer string \"" << str << '"';
+  if (!check_utf8(error_message)) {
+    return Status::Error("Strings must be encoded in UTF-8");
   }
-  return status;
+  return Status::Error(error_message);
 }
 }  // namespace detail
 

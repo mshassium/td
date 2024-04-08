@@ -1,6 +1,6 @@
 #
 # Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com),
-# Pellegrino Prevete (pellegrinoprevete@gmail.com)  2014-2023
+# Pellegrino Prevete (pellegrinoprevete@gmail.com)  2014-2024
 #
 # Distributed under the Boost Software License, Version 1.0. (See accompanying
 # file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -8,12 +8,16 @@
 from ctypes.util import find_library
 from ctypes import *
 import json
+import os
 import sys
 
 # load shared library
-tdjson_path = find_library('tdjson') or 'tdjson.dll'
+tdjson_path = find_library('tdjson')
 if tdjson_path is None:
-    sys.exit("Can't find 'tdjson' library")
+    if os.name == 'nt':
+        tdjson_path = os.path.join(os.path.dirname(__file__), 'tdjson.dll')
+    else:
+        sys.exit("Can't find 'tdjson' library")
 tdjson = CDLL(tdjson_path)
 
 # load TDLib functions from shared library
@@ -102,8 +106,7 @@ while True:
                          'api_hash': 'a3406de8d171bb422bb6ddf3bbd800e2',
                          'system_language_code': 'en',
                          'device_model': 'Desktop',
-                         'application_version': '1.0',
-                         'enable_storage_optimizer': True})
+                         'application_version': '1.0'})
 
             # enter phone number to log in
             if auth_state['@type'] == 'authorizationStateWaitPhoneNumber':

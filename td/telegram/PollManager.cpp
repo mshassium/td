@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -12,6 +12,7 @@
 #include "td/telegram/ContactsManager.h"
 #include "td/telegram/Dependencies.h"
 #include "td/telegram/DialogId.h"
+#include "td/telegram/DialogManager.h"
 #include "td/telegram/Global.h"
 #include "td/telegram/logevent/LogEvent.h"
 #include "td/telegram/MessageId.h"
@@ -61,7 +62,7 @@ class GetPollResultsQuery final : public Td::ResultHandler {
     poll_id_ = poll_id;
     dialog_id_ = message_full_id.get_dialog_id();
     message_id_ = message_full_id.get_message_id();
-    auto input_peer = td_->messages_manager_->get_input_peer(dialog_id_, AccessRights::Read);
+    auto input_peer = td_->dialog_manager_->get_input_peer(dialog_id_, AccessRights::Read);
     if (input_peer == nullptr) {
       LOG(INFO) << "Can't reget poll, because have no read access to " << dialog_id_;
       return promise_.set_value(nullptr);
@@ -82,13 +83,7 @@ class GetPollResultsQuery final : public Td::ResultHandler {
   }
 
   void on_error(Status status) final {
-    if (status.message() == "MESSAGE_ID_INVALID") {
-      // likely, the message has already been deleted
-      if (dialog_id_.get_type() == DialogType::Channel) {
-        td_->messages_manager_->get_message_from_server({dialog_id_, message_id_}, Promise<Unit>(),
-                                                        "GetPollResultsQuery");
-      }
-    } else if (!td_->messages_manager_->on_get_dialog_error(dialog_id_, status, "GetPollResultsQuery")) {
+    if (!td_->messages_manager_->on_get_message_error(dialog_id_, message_id_, status, "GetPollResultsQuery")) {
       LOG(ERROR) << "Receive " << status << ", while trying to get results of " << poll_id_;
     }
     promise_.set_error(std::move(status));
@@ -108,7 +103,7 @@ class GetPollVotersQuery final : public Td::ResultHandler {
   void send(PollId poll_id, MessageFullId message_full_id, BufferSlice &&option, const string &offset, int32 limit) {
     poll_id_ = poll_id;
     dialog_id_ = message_full_id.get_dialog_id();
-    auto input_peer = td_->messages_manager_->get_input_peer(dialog_id_, AccessRights::Read);
+    auto input_peer = td_->dialog_manager_->get_input_peer(dialog_id_, AccessRights::Read);
     if (input_peer == nullptr) {
       LOG(INFO) << "Can't get poll, because have no read access to " << dialog_id_;
       return promise_.set_error(Status::Error(400, "Chat is not accessible"));
@@ -135,7 +130,7 @@ class GetPollVotersQuery final : public Td::ResultHandler {
   }
 
   void on_error(Status status) final {
-    if (!td_->messages_manager_->on_get_dialog_error(dialog_id_, status, "GetPollVotersQuery") &&
+    if (!td_->dialog_manager_->on_get_dialog_error(dialog_id_, status, "GetPollVotersQuery") &&
         status.message() != "MESSAGE_ID_INVALID") {
       LOG(ERROR) << "Receive " << status << ", while trying to get voters of " << poll_id_;
     }
@@ -154,7 +149,7 @@ class SendVoteQuery final : public Td::ResultHandler {
   void send(MessageFullId message_full_id, vector<BufferSlice> &&options, PollId poll_id, uint64 generation,
             NetQueryRef *query_ref) {
     dialog_id_ = message_full_id.get_dialog_id();
-    auto input_peer = td_->messages_manager_->get_input_peer(dialog_id_, AccessRights::Read);
+    auto input_peer = td_->dialog_manager_->get_input_peer(dialog_id_, AccessRights::Read);
     if (input_peer == nullptr) {
       LOG(INFO) << "Can't set poll answer, because have no read access to " << dialog_id_;
       return on_error(Status::Error(400, "Can't access the chat"));
@@ -180,7 +175,7 @@ class SendVoteQuery final : public Td::ResultHandler {
   }
 
   void on_error(Status status) final {
-    td_->messages_manager_->on_get_dialog_error(dialog_id_, status, "SendVoteQuery");
+    td_->dialog_manager_->on_get_dialog_error(dialog_id_, status, "SendVoteQuery");
     promise_.set_error(std::move(status));
   }
 };
@@ -195,7 +190,7 @@ class StopPollQuery final : public Td::ResultHandler {
 
   void send(MessageFullId message_full_id, unique_ptr<ReplyMarkup> &&reply_markup, PollId poll_id) {
     dialog_id_ = message_full_id.get_dialog_id();
-    auto input_peer = td_->messages_manager_->get_input_peer(dialog_id_, AccessRights::Edit);
+    auto input_peer = td_->dialog_manager_->get_input_peer(dialog_id_, AccessRights::Edit);
     if (input_peer == nullptr) {
       LOG(INFO) << "Can't close poll, because have no edit access to " << dialog_id_;
       return on_error(Status::Error(400, "Can't access the chat"));
@@ -213,9 +208,9 @@ class StopPollQuery final : public Td::ResultHandler {
     auto input_media = telegram_api::make_object<telegram_api::inputMediaPoll>(0, std::move(poll),
                                                                                vector<BufferSlice>(), string(), Auto());
     send_query(G()->net_query_creator().create(
-        telegram_api::messages_editMessage(flags, false /*ignored*/, std::move(input_peer), message_id, string(),
-                                           std::move(input_media), std::move(input_reply_markup),
-                                           vector<tl_object_ptr<telegram_api::MessageEntity>>(), 0),
+        telegram_api::messages_editMessage(flags, false /*ignored*/, false /*ignored*/, std::move(input_peer),
+                                           message_id, string(), std::move(input_media), std::move(input_reply_markup),
+                                           vector<tl_object_ptr<telegram_api::MessageEntity>>(), 0, 0),
         {{poll_id}, {dialog_id_}}));
   }
 
@@ -234,7 +229,7 @@ class StopPollQuery final : public Td::ResultHandler {
     if (!td_->auth_manager_->is_bot() && status.message() == "MESSAGE_NOT_MODIFIED") {
       return promise_.set_value(Unit());
     }
-    td_->messages_manager_->on_get_dialog_error(dialog_id_, status, "StopPollQuery");
+    td_->dialog_manager_->on_get_dialog_error(dialog_id_, status, "StopPollQuery");
     promise_.set_error(std::move(status));
   }
 };
@@ -251,6 +246,10 @@ PollManager::PollManager(Td *td, ActorShared<> parent) : td_(td), parent_(std::m
 }
 
 void PollManager::start_up() {
+  if (td_->auth_manager_->is_bot()) {
+    return;
+  }
+
   class StateCallback final : public StateManager::Callback {
    public:
     explicit StateCallback(ActorId<PollManager> parent) : parent_(std::move(parent)) {
@@ -274,7 +273,8 @@ void PollManager::tear_down() {
 
 PollManager::~PollManager() {
   Scheduler::instance()->destroy_on_scheduler(G()->get_gc_scheduler_id(), polls_, server_poll_messages_,
-                                              other_poll_messages_, poll_voters_, loaded_from_database_polls_);
+                                              other_poll_messages_, reply_poll_counts_, poll_voters_,
+                                              loaded_from_database_polls_);
 }
 
 void PollManager::on_update_poll_timeout_callback(void *poll_manager_ptr, int64 poll_id_int) {
@@ -725,13 +725,36 @@ void PollManager::unregister_poll(PollId poll_id, MessageFullId message_full_id,
   }
 }
 
+void PollManager::register_reply_poll(PollId poll_id) {
+  CHECK(have_poll(poll_id));
+  CHECK(!is_local_poll_id(poll_id));
+  LOG(INFO) << "Register replied " << poll_id;
+  reply_poll_counts_[poll_id]++;
+  if (!G()->close_flag()) {
+    unload_poll_timeout_.cancel_timeout(poll_id.get());
+  }
+}
+
+void PollManager::unregister_reply_poll(PollId poll_id) {
+  CHECK(have_poll(poll_id));
+  CHECK(!is_local_poll_id(poll_id));
+  LOG(INFO) << "Unregister replied " << poll_id;
+  auto &count = reply_poll_counts_[poll_id];
+  CHECK(count > 0);
+  count--;
+  if (count == 0) {
+    reply_poll_counts_.erase(poll_id);
+    schedule_poll_unload(poll_id);
+  }
+}
+
 bool PollManager::can_unload_poll(PollId poll_id) {
   if (G()->close_flag()) {
     return false;
   }
   if (is_local_poll_id(poll_id) || server_poll_messages_.count(poll_id) != 0 ||
-      other_poll_messages_.count(poll_id) != 0 || pending_answers_.count(poll_id) != 0 ||
-      being_closed_polls_.count(poll_id) != 0) {
+      other_poll_messages_.count(poll_id) != 0 || reply_poll_counts_.count(poll_id) != 0 ||
+      pending_answers_.count(poll_id) != 0 || being_closed_polls_.count(poll_id) != 0) {
     return false;
   }
 
@@ -884,11 +907,12 @@ void PollManager::do_set_poll_answer(PollId poll_id, MessageFullId message_full_
       CHECK(pending_answer.log_event_id_ == 0);
       log_event_id = binlog_add(G()->td_db()->get_binlog(), LogEvent::HandlerType::SetPollAnswer, storer);
       LOG(INFO) << "Add set poll answer log event " << log_event_id;
+      CHECK(log_event_id != 0);
     } else {
       CHECK(pending_answer.log_event_id_ != 0);
       log_event_id = pending_answer.log_event_id_;
-      auto new_log_event_id = binlog_rewrite(G()->td_db()->get_binlog(), pending_answer.log_event_id_,
-                                             LogEvent::HandlerType::SetPollAnswer, storer);
+      auto new_log_event_id =
+          binlog_rewrite(G()->td_db()->get_binlog(), log_event_id, LogEvent::HandlerType::SetPollAnswer, storer);
       LOG(INFO) << "Rewrite set poll answer log event " << log_event_id << " with " << new_log_event_id;
     }
   }
@@ -988,7 +1012,7 @@ void PollManager::on_set_poll_answer_finished(PollId poll_id, Result<Unit> &&res
   if (!G()->close_flag()) {
     auto poll = get_poll(poll_id);
     if (poll != nullptr && !poll->was_saved_) {
-      // no updates was sent during updates processing, so send them
+      // no updates were sent during updates processing, so send them
       // poll wasn't changed, so there is no reason to actually save it
       if (!(poll->is_closed_ && poll->is_updated_after_close_)) {
         LOG(INFO) << "Schedule updating of " << poll_id << " soon";
@@ -1875,9 +1899,7 @@ void PollManager::on_get_poll_vote(PollId poll_id, DialogId dialog_id, vector<Bu
     LOG(ERROR) << "Receive updateMessagePollVote from invalid " << dialog_id;
     return;
   }
-  if (!td_->auth_manager_->is_bot()) {
-    return;
-  }
+  CHECK(td_->auth_manager_->is_bot());
 
   vector<int32> option_ids;
   for (auto &option : options) {

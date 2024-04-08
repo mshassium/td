@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -9,6 +9,7 @@
 #include "td/telegram/ContactsManager.h"
 #include "td/telegram/Dependencies.h"
 #include "td/telegram/Td.h"
+#include "td/telegram/telegram_api.h"
 
 #include "td/utils/algorithm.h"
 #include "td/utils/FlatHashSet.h"
@@ -112,6 +113,9 @@ bool StoryInteractionInfo::set_recent_viewer_user_ids(vector<UserId> &&user_ids)
   }
   if (user_ids.size() > MAX_RECENT_VIEWERS) {
     user_ids.resize(MAX_RECENT_VIEWERS);
+  }
+  if (recent_viewer_user_ids_.size() < user_ids.size() && user_ids.size() <= static_cast<size_t>(view_count_)) {
+    return false;
   }
   if (recent_viewer_user_ids_ != user_ids) {
     recent_viewer_user_ids_ = std::move(user_ids);

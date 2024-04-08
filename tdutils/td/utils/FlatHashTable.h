@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -308,7 +308,7 @@ class FlatHashTable {
 
   template <class... ArgsT>
   std::pair<NodePointer, bool> emplace(KeyT key, ArgsT &&...args) {
-    CHECK(!is_hash_table_key_empty(key));
+    CHECK(!is_hash_table_key_empty<EqT>(key));
     if (unlikely(bucket_count_mask_ == 0)) {
       CHECK(used_node_count_ == 0);
       resize(8);
@@ -447,7 +447,7 @@ class FlatHashTable {
   }
 
   NodeT *find_impl(const KeyT &key) {
-    if (unlikely(nodes_ == nullptr) || is_hash_table_key_empty(key)) {
+    if (unlikely(nodes_ == nullptr) || is_hash_table_key_empty<EqT>(key)) {
       return nullptr;
     }
     auto bucket = calc_bucket(key);

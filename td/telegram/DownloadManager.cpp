@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -424,7 +424,7 @@ class DownloadManagerImpl final : public DownloadManager {
           sent_counters_ = Counters();
         }
       }
-    } else {
+    } else if (!G()->td_db()->get_binlog_pmc()->get("dlds_counter").empty()) {
       G()->td_db()->get_binlog_pmc()->erase("dlds_counter");
       G()->td_db()->get_binlog_pmc()->erase_by_prefix("dlds#");
     }

@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -56,6 +56,10 @@ class PollManager final : public Actor {
   void register_poll(PollId poll_id, MessageFullId message_full_id, const char *source);
 
   void unregister_poll(PollId poll_id, MessageFullId message_full_id, const char *source);
+
+  void register_reply_poll(PollId poll_id);
+
+  void unregister_reply_poll(PollId poll_id);
 
   bool get_poll_is_closed(PollId poll_id) const;
 
@@ -234,6 +238,8 @@ class PollManager final : public Actor {
 
   WaitFreeHashMap<PollId, WaitFreeHashSet<MessageFullId, MessageFullIdHash>, PollIdHash> server_poll_messages_;
   WaitFreeHashMap<PollId, WaitFreeHashSet<MessageFullId, MessageFullIdHash>, PollIdHash> other_poll_messages_;
+
+  WaitFreeHashMap<PollId, int32, PollIdHash> reply_poll_counts_;
 
   struct PendingPollAnswer {
     vector<string> options_;

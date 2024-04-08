@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -240,6 +240,16 @@ Variant<PhotoSize, string> get_photo_size(FileManager *file_manager, PhotoSizeSo
     if (res.type >= 128) {
       LOG(ERROR) << "Wrong photoSize \"" << type << "\" " << res;
       res.type = 0;
+    }
+  }
+  if (format == PhotoFormat::Tgs) {
+    if (res.type == 's') {
+      format = PhotoFormat::Webp;
+    } else if (res.type == 'v') {
+      format = PhotoFormat::Webm;
+    } else if (res.type != 'a') {
+      LOG(ERROR) << "Receive sticker set thumbnail of type " << res.type;
+      format = PhotoFormat::Webp;
     }
   }
   if (source.get_type("get_photo_size") == PhotoSizeSource::Type::Thumbnail) {

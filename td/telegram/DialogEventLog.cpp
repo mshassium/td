@@ -1,17 +1,21 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
 #include "td/telegram/DialogEventLog.h"
 
+#include "td/telegram/AccentColorId.h"
+#include "td/telegram/BackgroundInfo.h"
 #include "td/telegram/ChannelId.h"
 #include "td/telegram/ChatReactions.h"
 #include "td/telegram/ContactsManager.h"
 #include "td/telegram/DialogInviteLink.h"
 #include "td/telegram/DialogLocation.h"
+#include "td/telegram/DialogManager.h"
 #include "td/telegram/DialogParticipant.h"
+#include "td/telegram/EmojiStatus.h"
 #include "td/telegram/ForumTopicInfo.h"
 #include "td/telegram/Global.h"
 #include "td/telegram/GroupCallManager.h"
@@ -20,10 +24,12 @@
 #include "td/telegram/MessageSender.h"
 #include "td/telegram/MessagesManager.h"
 #include "td/telegram/MessageTtl.h"
+#include "td/telegram/PeerColor.h"
 #include "td/telegram/Photo.h"
 #include "td/telegram/StickersManager.h"
 #include "td/telegram/Td.h"
 #include "td/telegram/telegram_api.h"
+#include "td/telegram/ThemeManager.h"
 
 #include "td/utils/buffer.h"
 #include "td/utils/logging.h"
@@ -145,8 +151,9 @@ static td_api::object_ptr<td_api::ChatEventAction> get_chat_event_action_object(
     }
     case telegram_api::channelAdminLogEventActionDefaultBannedRights::ID: {
       auto action = move_tl_object_as<telegram_api::channelAdminLogEventActionDefaultBannedRights>(action_ptr);
-      auto old_permissions = RestrictedRights(action->prev_banned_rights_);
-      auto new_permissions = RestrictedRights(action->new_banned_rights_);
+      auto channel_type = td->contacts_manager_->get_channel_type(channel_id);
+      auto old_permissions = RestrictedRights(action->prev_banned_rights_, channel_type);
+      auto new_permissions = RestrictedRights(action->new_banned_rights_, channel_type);
       return td_api::make_object<td_api::chatEventPermissionsChanged>(old_permissions.get_chat_permissions_object(),
                                                                       new_permissions.get_chat_permissions_object());
     }
@@ -212,12 +219,15 @@ static td_api::object_ptr<td_api::ChatEventAction> get_chat_event_action_object(
       auto action = move_tl_object_as<telegram_api::channelAdminLogEventActionChangeStickerSet>(action_ptr);
       auto old_sticker_set_id = td->stickers_manager_->add_sticker_set(std::move(action->prev_stickerset_));
       auto new_sticker_set_id = td->stickers_manager_->add_sticker_set(std::move(action->new_stickerset_));
-      if (!old_sticker_set_id.is_valid() || !new_sticker_set_id.is_valid()) {
-        LOG(ERROR) << "Skip " << to_string(action);
-        return nullptr;
-      }
       return td_api::make_object<td_api::chatEventStickerSetChanged>(old_sticker_set_id.get(),
                                                                      new_sticker_set_id.get());
+    }
+    case telegram_api::channelAdminLogEventActionChangeEmojiStickerSet::ID: {
+      auto action = move_tl_object_as<telegram_api::channelAdminLogEventActionChangeEmojiStickerSet>(action_ptr);
+      auto old_sticker_set_id = td->stickers_manager_->add_sticker_set(std::move(action->prev_stickerset_));
+      auto new_sticker_set_id = td->stickers_manager_->add_sticker_set(std::move(action->new_stickerset_));
+      return td_api::make_object<td_api::chatEventCustomEmojiStickerSetChanged>(old_sticker_set_id.get(),
+                                                                                new_sticker_set_id.get());
     }
     case telegram_api::channelAdminLogEventActionTogglePreHistoryHidden::ID: {
       auto action = move_tl_object_as<telegram_api::channelAdminLogEventActionTogglePreHistoryHidden>(action_ptr);
@@ -226,14 +236,14 @@ static td_api::object_ptr<td_api::ChatEventAction> get_chat_event_action_object(
     case telegram_api::channelAdminLogEventActionChangeLinkedChat::ID: {
       auto action = move_tl_object_as<telegram_api::channelAdminLogEventActionChangeLinkedChat>(action_ptr);
 
-      auto get_dialog_from_channel_id = [messages_manager = td->messages_manager_.get()](int64 channel_id_int) {
+      auto get_dialog_from_channel_id = [dialog_manager = td->dialog_manager_.get()](int64 channel_id_int) {
         ChannelId channel_id(channel_id_int);
         if (!channel_id.is_valid()) {
           return DialogId();
         }
 
         DialogId dialog_id(channel_id);
-        messages_manager->force_create_dialog(dialog_id, "get_dialog_from_channel_id");
+        dialog_manager->force_create_dialog(dialog_id, "get_dialog_from_channel_id");
         return dialog_id;
       };
 
@@ -244,8 +254,8 @@ static td_api::object_ptr<td_api::ChatEventAction> get_chat_event_action_object(
         return nullptr;
       }
       return td_api::make_object<td_api::chatEventLinkedChatChanged>(
-          td->messages_manager_->get_chat_id_object(old_linked_dialog_id, "chatEventLinkedChatChanged"),
-          td->messages_manager_->get_chat_id_object(new_linked_dialog_id, "chatEventLinkedChatChanged 2"));
+          td->dialog_manager_->get_chat_id_object(old_linked_dialog_id, "chatEventLinkedChatChanged"),
+          td->dialog_manager_->get_chat_id_object(new_linked_dialog_id, "chatEventLinkedChatChanged 2"));
     }
     case telegram_api::channelAdminLogEventActionChangeLocation::ID: {
       auto action = move_tl_object_as<telegram_api::channelAdminLogEventActionChangeLocation>(action_ptr);
@@ -426,6 +436,40 @@ static td_api::object_ptr<td_api::ChatEventAction> get_chat_event_action_object(
       auto action = move_tl_object_as<telegram_api::channelAdminLogEventActionToggleAntiSpam>(action_ptr);
       return td_api::make_object<td_api::chatEventHasAggressiveAntiSpamEnabledToggled>(action->new_value_);
     }
+    case telegram_api::channelAdminLogEventActionChangePeerColor::ID: {
+      auto action = move_tl_object_as<telegram_api::channelAdminLogEventActionChangePeerColor>(action_ptr);
+      auto old_peer_color = PeerColor(action->prev_value_);
+      auto new_peer_color = PeerColor(action->new_value_);
+      return td_api::make_object<td_api::chatEventAccentColorChanged>(
+          td->theme_manager_->get_accent_color_id_object(old_peer_color.accent_color_id_, AccentColorId(channel_id)),
+          old_peer_color.background_custom_emoji_id_.get(),
+          td->theme_manager_->get_accent_color_id_object(new_peer_color.accent_color_id_, AccentColorId(channel_id)),
+          new_peer_color.background_custom_emoji_id_.get());
+    }
+    case telegram_api::channelAdminLogEventActionChangeProfilePeerColor::ID: {
+      auto action = move_tl_object_as<telegram_api::channelAdminLogEventActionChangeProfilePeerColor>(action_ptr);
+      auto old_peer_color = PeerColor(action->prev_value_);
+      auto new_peer_color = PeerColor(action->new_value_);
+      return td_api::make_object<td_api::chatEventProfileAccentColorChanged>(
+          td->theme_manager_->get_profile_accent_color_id_object(old_peer_color.accent_color_id_),
+          old_peer_color.background_custom_emoji_id_.get(),
+          td->theme_manager_->get_profile_accent_color_id_object(new_peer_color.accent_color_id_),
+          new_peer_color.background_custom_emoji_id_.get());
+    }
+    case telegram_api::channelAdminLogEventActionChangeWallpaper::ID: {
+      auto action = move_tl_object_as<telegram_api::channelAdminLogEventActionChangeWallpaper>(action_ptr);
+      auto old_background_info = BackgroundInfo(td, std::move(action->prev_value_), true);
+      auto new_background_info = BackgroundInfo(td, std::move(action->new_value_), true);
+      return td_api::make_object<td_api::chatEventBackgroundChanged>(
+          old_background_info.get_chat_background_object(td), new_background_info.get_chat_background_object(td));
+    }
+    case telegram_api::channelAdminLogEventActionChangeEmojiStatus::ID: {
+      auto action = move_tl_object_as<telegram_api::channelAdminLogEventActionChangeEmojiStatus>(action_ptr);
+      auto old_emoji_status = EmojiStatus(std::move(action->prev_value_));
+      auto new_emoji_status = EmojiStatus(std::move(action->new_value_));
+      return td_api::make_object<td_api::chatEventEmojiStatusChanged>(old_emoji_status.get_emoji_status_object(),
+                                                                      new_emoji_status.get_emoji_status_object());
+    }
     default:
       UNREACHABLE();
       return nullptr;
@@ -578,7 +622,7 @@ static telegram_api::object_ptr<telegram_api::channelAdminLogEventsFilter> get_i
 void get_dialog_event_log(Td *td, DialogId dialog_id, const string &query, int64 from_event_id, int32 limit,
                           const td_api::object_ptr<td_api::chatEventLogFilters> &filters,
                           const vector<UserId> &user_ids, Promise<td_api::object_ptr<td_api::chatEvents>> &&promise) {
-  if (!td->messages_manager_->have_dialog_force(dialog_id, "get_dialog_event_log")) {
+  if (!td->dialog_manager_->have_dialog_force(dialog_id, "get_dialog_event_log")) {
     return promise.set_error(Status::Error(400, "Chat not found"));
   }
 

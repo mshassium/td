@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -68,8 +68,9 @@ class Session final
   };
 
   Session(unique_ptr<Callback> callback, std::shared_ptr<AuthDataShared> shared_auth_data, int32 raw_dc_id, int32 dc_id,
-          bool is_primary, bool is_main, bool use_pfs, bool persist_tmp_auth_key, bool is_cdn, bool need_destroy,
-          const mtproto::AuthKey &tmp_auth_key, const vector<mtproto::ServerSalt> &server_salts);
+          bool is_primary, bool is_main, bool use_pfs, bool persist_tmp_auth_key, bool is_cdn,
+          bool need_destroy_auth_key, const mtproto::AuthKey &tmp_auth_key,
+          const vector<mtproto::ServerSalt> &server_salts);
 
   void send(NetQueryPtr &&query);
 
@@ -115,7 +116,7 @@ class Session final
   const bool is_main_;     // true only for the primary Session(s) to the main DC
   const bool persist_tmp_auth_key_;
   const bool is_cdn_;
-  const bool need_destroy_;
+  const bool need_destroy_auth_key_;
   bool was_on_network_ = false;
   bool network_flag_ = false;
   bool online_flag_ = false;
@@ -170,7 +171,6 @@ class Session final
   unique_ptr<mtproto::RawConnection> cached_connection_;
 
   std::shared_ptr<Callback> callback_;
-  mtproto::AuthData auth_data_;
   bool use_pfs_{false};
   bool need_check_main_key_{false};
   TempAuthKeyWatchdog::RegisteredAuthKey registered_temp_auth_key_;
@@ -196,6 +196,10 @@ class Session final
   std::array<HandshakeInfo, 2> handshake_info_;
 
   double wakeup_at_;
+
+  // mtproto::AuthData should be the last field, because it's size is about 32 KB
+  mtproto::AuthData auth_data_;
+
   void on_handshake_ready(Result<unique_ptr<mtproto::AuthKeyHandshake>> r_handshake);
   void create_gen_auth_key_actor(HandshakeId handshake_id);
   void auth_loop(double now);
@@ -210,8 +214,9 @@ class Session final
   void on_online(bool online_flag);
   void on_logging_out(bool logging_out_flag);
 
-  void on_auth_key_updated() final;
-  void on_tmp_auth_key_updated() final;
+  void on_auth_key_updated();
+  void on_tmp_auth_key_updated();
+
   void on_server_salt_updated() final;
   void on_server_time_difference_updated(bool force) final;
 
