@@ -1,11 +1,10 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
-package com.thevisa.bot.telegram.walle.tdapi;
-
+package org.mshassium.frostmourne.walle.tdapi;
 
 
 import java.io.BufferedReader;
@@ -304,15 +303,16 @@ public final class Example {
         Client.setLogMessageHandler(0, new LogMessageHandler());
 
         // disable TDLib log and redirect fatal errors and plain log messages to a file
-        try {
-            Client.execute(new TdApi.SetLogVerbosityLevel(0));
-            Client.execute(new TdApi.SetLogStream(new TdApi.LogStreamFile("tdlib.log", 1 << 27, false)));
-        } catch (Client.ExecutionException error) {
+        Client.execute(new TdApi.SetLogVerbosityLevel(0));
+        if (Client.execute(new TdApi.SetLogStream(new TdApi.LogStreamFile("tdlib.log", 1 << 27, false))) instanceof TdApi.Error) {
             throw new IOError(new IOException("Write access to the current directory is required"));
         }
 
         // create client
         client = Client.create(new UpdateHandler(), null, null);
+
+        // test Client.execute
+        defaultHandler.onResult(Client.execute(new TdApi.GetTextEntities("@telegram /test_command https://telegram.org telegram.me @gif @test")));
 
         // main loop
         while (!needQuit) {
@@ -379,11 +379,6 @@ public final class Example {
                 case TdApi.Chat.CONSTRUCTOR: {
                     TdApi.Chat chat = (TdApi.Chat) object;
                     TdApi.Message msg = chat.lastMessage;
-                    TdApi.MessageText content = (TdApi.MessageText) msg.content;
-                    String text = content.text.text;
-                    if (text.contains("visa")) {
-                        sendMessage(Long.parseLong("-933675606"), "Сообщение с ключевым словом обнаружено. Сообщение " + text);
-                    }
                 }
                 default:
                     print("Not message object");

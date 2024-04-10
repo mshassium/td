@@ -1,10 +1,10 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2023
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
-package com.thevisa.bot.telegram.walle.tdapi;
+package org.mshassium.frostmourne.walle.tdapi;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -63,24 +63,6 @@ public final class Client {
     }
 
     /**
-     * Exception class thrown when TDLib error occurred while performing {@link #execute(TdApi.Function)}.
-     */
-    public static class ExecutionException extends Exception {
-        /**
-         * Original TDLib error occurred when performing one of the synchronous functions.
-         */
-        public final TdApi.Error error;
-
-        /**
-         * @param error TDLib error occurred while performing {@link #execute(TdApi.Function)}.
-         */
-        ExecutionException (TdApi.Error error) {
-            super(error.code + ": " + error.message);
-            this.error = error;
-        }
-    }
-
-    /**
      * Sends a request to the TDLib.
      *
      * @param query            Object representing a query to the TDLib.
@@ -90,6 +72,7 @@ public final class Client {
      * @param exceptionHandler Exception handler with onException method which will be called on
      *                         exception thrown from resultHandler. If it is null, then
      *                         defaultExceptionHandler will be called.
+     * @throws NullPointerException if query is null.
      */
     public void send(TdApi.Function query, ResultHandler resultHandler, ExceptionHandler exceptionHandler) {
         long queryId = currentQueryId.incrementAndGet();
@@ -106,6 +89,7 @@ public final class Client {
      * @param resultHandler Result handler with onResult method which will be called with result
      *                      of the query or with TdApi.Error as parameter. If it is null, then
      *                      defaultExceptionHandler will be called.
+     * @throws NullPointerException if query is null.
      */
     public void send(TdApi.Function query, ResultHandler resultHandler) {
         send(query, resultHandler, null);
@@ -115,17 +99,11 @@ public final class Client {
      * Synchronously executes a TDLib request. Only a few marked accordingly requests can be executed synchronously.
      *
      * @param query Object representing a query to the TDLib.
-     * @param <T> Automatically deduced return type of the query.
      * @return request result.
-     * @throws ExecutionException if query execution fails.
+     * @throws NullPointerException if query is null.
      */
-    @SuppressWarnings("unchecked")
-    public static <T extends TdApi.Object> T execute(TdApi.Function<T> query) throws ExecutionException {
-        TdApi.Object object = nativeClientExecute(query);
-        if (object instanceof TdApi.Error) {
-            throw new ExecutionException((TdApi.Error) object);
-        }
-        return (T) object;
+    public static TdApi.Object execute(TdApi.Function query) {
+        return nativeClientExecute(query);
     }
 
     /**

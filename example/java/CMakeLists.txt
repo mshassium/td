@@ -39,7 +39,7 @@ if ((CMAKE_SYSTEM_NAME MATCHES "FreeBSD") AND (CMAKE_SYSTEM_VERSION MATCHES "HBS
   set(PHP_EXECUTABLE "PHP_EXECUTABLE-NOTFOUND")
 endif()
 
-set(TD_API_JAVA_PACKAGE "com/thevisa/bot/telegram/walle/tdapi")
+set(TD_API_JAVA_PACKAGE "org/mshassium/frostmourne/walle/tdapi")
 set(TD_API_JAVA_PATH ${CMAKE_CURRENT_SOURCE_DIR})
 set(TD_API_TLO_PATH ${CMAKE_CURRENT_SOURCE_DIR}/td/bin/td/generate/scheme/td_api.tlo)
 set(TD_API_TL_PATH ${CMAKE_CURRENT_SOURCE_DIR}/td/bin/td/generate/scheme/td_api.tl)
@@ -65,7 +65,7 @@ add_custom_target(build_java
 )
 
 add_custom_target(generate_javadoc
-  COMMAND ${Java_JAVADOC_EXECUTABLE} -encoding UTF-8 -charset UTF-8 -d ${JAVA_OUTPUT_DIRECTORY}/../docs com.thevisa.bot.telegram.walle.tdapi
+  COMMAND ${Java_JAVADOC_EXECUTABLE} -encoding UTF-8 -charset UTF-8 -d ${JAVA_OUTPUT_DIRECTORY}/../docs org.mshassium.frostmourne.walle.tdapi
   WORKING_DIRECTORY ${TD_API_JAVA_PATH}
   COMMENT "Generating Javadoc documentation"
   DEPENDS td_generate_java_api

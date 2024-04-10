@@ -810,7 +810,8 @@ static Result<uint32> maximize_buffer(const NativeFd &fd, int optname, uint32 ma
   uint32 min_size = old_size;
   while (min_size <= max_size) {
     uint32 avg_size = min_size + (max_size - min_size) / 2;
-    if (setsockopt(fd.socket(), SOL_SOCKET, optname, reinterpret_cast<const char *>(&avg_size), sizeof(avg_size)) == 0) {
+    if (setsockopt(fd.socket(), SOL_SOCKET, optname, reinterpret_cast<const char *>(&avg_size), sizeof(avg_size)) ==
+        0) {
       last_good_size = avg_size;
       min_size = avg_size + 1;
     } else {
